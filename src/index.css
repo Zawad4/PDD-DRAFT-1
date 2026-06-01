@@ -1,0 +1,303 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", sans-serif;
+  --font-display: "Outfit", sans-serif;
+  
+  --color-luxury-bg: #080808;
+  --color-luxury-card: rgba(12, 12, 12, 0.65);
+  --color-luxury-card-hover: rgba(18, 18, 18, 0.75);
+  --color-luxury-border: rgba(255, 255, 255, 0.06);
+  --color-luxury-border-hover: rgba(255, 255, 255, 0.14);
+  --color-chrome-start: #ffffff;
+  --color-chrome-end: #8e8e93;
+}
+
+/* ============================================================
+   LIGHT MODE — Premium warm-ivory palette
+   ============================================================ */
+.light-mode {
+  --color-luxury-bg: #f2f0eb;
+  --color-luxury-card: rgba(255, 255, 253, 0.82);
+  --color-luxury-card-hover: rgba(255, 255, 255, 0.97);
+  --color-luxury-border: rgba(0, 0, 0, 0.07);
+  --color-luxury-border-hover: rgba(0, 0, 0, 0.16);
+  --color-chrome-start: #111111;
+  --color-chrome-end: #374151;
+}
+
+/* Base text + bg for the whole document in light mode */
+.light-mode,
+.light-mode body {
+  color: #1a1a2e;
+}
+
+/* ── Body background ──────────────────────────────────────── */
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: var(--color-luxury-bg);
+    scroll-behavior: smooth;
+    color-scheme: dark;
+    transition: background-color 0.5s ease, color 0.5s ease;
+  }
+
+  html.light-mode {
+    color-scheme: light;
+  }
+
+  body {
+    background-color: var(--color-luxury-bg);
+    background-image:
+      radial-gradient(at 0% 0%,   rgba(99, 102, 241, 0.07) 0px, transparent 50%),
+      radial-gradient(at 100% 0%,  rgba(139, 92, 246, 0.07) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(20, 184, 166, 0.05) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, rgba(244, 63, 94, 0.04)   0px, transparent 50%);
+    overflow-x: hidden;
+    min-height: 100vh;
+  }
+
+  body.light-mode {
+    background-image:
+      radial-gradient(at 0% 0%,    rgba(99, 102, 241, 0.09) 0px, transparent 55%),
+      radial-gradient(at 100% 0%,   rgba(139, 92, 246, 0.08) 0px, transparent 55%),
+      radial-gradient(at 50% 100%,  rgba(20, 184, 166, 0.07) 0px, transparent 55%),
+      radial-gradient(at 0% 100%,   rgba(244, 63, 94, 0.05)  0px, transparent 55%);
+  }
+
+  /* Premium scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.2); border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(128,128,128,0.4); }
+}
+
+/* ============================================================
+   LIGHT MODE — Component colour overrides
+   These override Tailwind's hardcoded dark utility classes
+   ============================================================ */
+
+/* ── Text ─────────────────────────────────────────────────── */
+.light-mode .text-white                   { color: #111827 !important; }
+.light-mode .text-neutral-100            { color: #1f2937 !important; }
+.light-mode .text-neutral-200            { color: #1f2937 !important; }
+.light-mode .text-neutral-300            { color: #374151 !important; }
+.light-mode .text-neutral-400            { color: #4b5563 !important; }
+.light-mode .text-neutral-500            { color: #6b7280 !important; }
+.light-mode .text-neutral-600            { color: #6b7280 !important; }
+
+/* ── Backgrounds ──────────────────────────────────────────── */
+.light-mode .bg-\[#080808\]              { background-color: #f2f0eb !important; }
+.light-mode .bg-\[#040404\]              { background-color: #e8e6e1 !important; }
+.light-mode .bg-\[#0c0c0c\]             { background-color: #f0eeea !important; }
+.light-mode .bg-\[#0d0d0d\]             { background-color: #ede9e3 !important; }
+.light-mode .bg-neutral-900             { background-color: #e8e6e1 !important; }
+.light-mode .bg-neutral-800             { background-color: #ddd9d3 !important; }
+.light-mode .bg-black\/80               { background-color: rgba(255,255,253,0.92) !important; }
+.light-mode .bg-black\/60               { background-color: rgba(255,255,253,0.85) !important; }
+.light-mode .bg-black\/20               { background-color: rgba(0,0,0,0.06) !important; }
+.light-mode .bg-black\/85               { background-color: rgba(255,255,253,0.90) !important; }
+
+/* Glass & alpha backgrounds */
+.light-mode .bg-white\/\[0\.01\]         { background-color: rgba(0,0,0,0.025) !important; }
+.light-mode .bg-white\/\[0\.02\]         { background-color: rgba(0,0,0,0.04) !important; }
+.light-mode .bg-white\/5                { background-color: rgba(0,0,0,0.04) !important; }
+.light-mode .bg-white\/10               { background-color: rgba(0,0,0,0.07) !important; }
+.light-mode .hover\:bg-white\/5:hover   { background-color: rgba(0,0,0,0.05) !important; }
+.light-mode .hover\:bg-white\/10:hover  { background-color: rgba(0,0,0,0.08) !important; }
+
+/* CTA buttons — keep white button legible on light bg */
+.light-mode .bg-white.text-black         { background-color: #111827 !important; color: #ffffff !important; }
+.light-mode .hover\:bg-neutral-200:hover { background-color: #1f2937 !important; }
+
+/* ── Borders ──────────────────────────────────────────────── */
+.light-mode .border-white\/5             { border-color: rgba(0,0,0,0.08) !important; }
+.light-mode .border-white\/10            { border-color: rgba(0,0,0,0.10) !important; }
+.light-mode .border-white\/20            { border-color: rgba(0,0,0,0.15) !important; }
+.light-mode .divide-white\/5 > * + *    { border-color: rgba(0,0,0,0.08) !important; }
+.light-mode .border-dashed.border-white\/10 { border-color: rgba(0,0,0,0.12) !important; }
+
+/* ── Nav & Footer ─────────────────────────────────────────── */
+.light-mode .glass-nav {
+  background: rgba(242,240,235,0.88) !important;
+  border-bottom-color: rgba(0,0,0,0.08) !important;
+}
+.light-mode footer {
+  background-color: #e5e3de !important;
+  border-top-color: rgba(0,0,0,0.08) !important;
+  color: #6b7280 !important;
+}
+
+/* Mobile full-screen menu */
+.light-mode .fixed.inset-0.bg-\[#080808\] {
+  background-color: #f2f0eb !important;
+}
+
+/* Settings modal backdrop */
+.light-mode .absolute.inset-0.bg-black {
+  background-color: rgba(0,0,0,0.55) !important;
+}
+
+/* ── Cards (profile-specific) ─────────────────────────────── */
+.light-mode .border-white\/\[0\.05\],
+.light-mode .border-white\/\[0\.1\]      { border-color: rgba(0,0,0,0.07) !important; }
+
+/* Image ring border on profile avatar */
+.light-mode .border-luxury-bg { border-color: #f2f0eb !important; }
+
+/* Story ring for "seen" state */
+.light-mode .bg-neutral-800 { background-color: #d6d3cc !important; }
+
+/* ── Specific interactive states ──────────────────────────── */
+.light-mode .hover\:text-white:hover     { color: #111827 !important; }
+.light-mode .hover\:bg-neutral-800:hover { background-color: #ddd9d3 !important; }
+
+/* Input fields */
+.light-mode input[type="email"],
+.light-mode input[type="password"],
+.light-mode input[type="text"] {
+  background-color: rgba(0,0,0,0.04) !important;
+  border-color: rgba(0,0,0,0.10) !important;
+  color: #111827 !important;
+}
+.light-mode input::placeholder { color: #9ca3af !important; }
+
+/* ── Match / Won badge ────────────────────────────────────── */
+.light-mode .bg-white.text-black.rounded-full {
+  background-color: #111827 !important;
+  color: #ffffff !important;
+}
+/* "Lost" match badge */
+.light-mode .bg-neutral-800.text-neutral-400 {
+  background-color: #e0ddd7 !important;
+  color: #6b7280 !important;
+}
+
+/* ── Activity heatmap zero state ──────────────────────────── */
+.light-mode .bg-neutral-900.border-white\/5 {
+  background-color: #e0ddd7 !important;
+  border-color: rgba(0,0,0,0.06) !important;
+}
+
+/* ── Settings modal card ──────────────────────────────────── */
+.light-mode .bg-neutral-900.border-white\/5.rounded-full {
+  background-color: #e0ddd7 !important;
+}
+/* Dark Mode button selected state inside settings */
+.light-mode button.bg-white.text-black.border-transparent {
+  background-color: #111827 !important;
+  color: #ffffff !important;
+}
+/* Light Mode button selected state inside settings */
+.light-mode button.bg-neutral-900.text-white.border-transparent {
+  background-color: #6366f1 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 20px rgba(99,102,241,0.25) !important;
+}
+
+/* ── LIVE badge ───────────────────────────────────────────── */
+.light-mode .bg-black\/85 { background-color: rgba(255,255,253,0.90) !important; }
+
+/* Custom premium classes */
+.font-display {
+  font-family: var(--font-display);
+}
+
+.glass-card {
+  background: var(--color-luxury-card);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--color-luxury-border);
+  border-radius: 28px;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card-hover:hover {
+  background: var(--color-luxury-card-hover);
+  border-color: var(--color-luxury-border-hover);
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 25px 50px -12px rgba(99, 102, 241, 0.08);
+}
+
+.chrome-text {
+  background: linear-gradient(180deg, var(--color-chrome-start) 0%, var(--color-chrome-end) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.chrome-glow {
+  box-shadow: 0 0 40px -10px rgba(99, 102, 241, 0.15);
+}
+
+.chrome-border-glow {
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.12), 0 10px 30px rgba(0, 0, 0, 0.05);
+}
+
+.glass-nav {
+  background: var(--color-luxury-card);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-bottom: 1px solid var(--color-luxury-border);
+  transition: background-color 0.5s ease, border-color 0.5s ease;
+}
+
+.glass-input {
+  background: rgba(128, 128, 128, 0.05);
+  border: 1px solid var(--color-luxury-border);
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.glass-input:focus {
+  background: rgba(128, 128, 128, 0.08);
+  border-color: var(--color-luxury-border-hover);
+  outline: none;
+}
+
+/* Hide default scrollbar styling for sliders */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Custom indicator pulse */
+.pulse-live {
+  position: relative;
+}
+.pulse-live::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  background-color: #6366f1; /* Premium Indigo pulse */
+  border-radius: 50%;
+  animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+.pulse-live::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px;
+  height: 6px;
+  background-color: #818cf8;
+  border-radius: 50%;
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: translate(-50%, -50%) scale(0.35);
+    opacity: 1;
+  }
+  80%, 100% {
+    transform: translate(-50%, -50%) scale(2.5);
+    opacity: 0;
+  }
+}

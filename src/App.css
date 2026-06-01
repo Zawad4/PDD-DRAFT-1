@@ -1,0 +1,44 @@
+/* Custom Leaflet Map styling */
+.leaflet-container {
+  background: #080808 !important;
+  font-family: inherit;
+  width: 100%;
+  height: 100%;
+}
+.leaflet-bar {
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5) !important;
+}
+.leaflet-bar a {
+  background-color: #121212 !important;
+  color: #a3a3a3 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  transition: all 0.2s ease;
+}
+.leaflet-bar a:hover {
+  background-color: #1a1a1a !important;
+  color: #fff !important;
+}
+.leaflet-popup-content-wrapper {
+  background: #121212 !important;
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.6) !important;
+  padding: 4px;
+}
+.leaflet-popup-tip {
+  background: #121212 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+.leaflet-popup-close-button {
+  color: #a3a3a3 !important;
+  top: 8px !important;
+  right: 8px !important;
+}
+.user-gps-marker, .venue-map-marker {
+  background: transparent !important;
+  border: none !important;
+}
