@@ -1,0 +1,22 @@
+{
+  "formValidationCases": [
+    {
+      "field": "email",
+      "valid": "test.athlete@example.com",
+      "invalid": "invalid-email-no-at",
+      "errorMessage": "Please enter a valid email address"
+    },
+    {
+      "field": "phone",
+      "valid": "+91 9876543210",
+      "invalid": "123",
+      "errorMessage": "Phone number must be 10 digits"
+    },
+    {
+      "field": "password",
+      "valid": "SecureP@ssw0rd2026",
+      "invalid": "123",
+      "errorMessage": "Password must be at least 8 characters with numbers and special characters"
+    }
+  ]
+}

@@ -3,35 +3,38 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Compass, Home as HomeIcon, ShoppingBag, Trophy,
   User, LayoutDashboard, Menu, Building2, ChevronDown,
-  LogOut, Settings, UserCircle, MapPin, Flame
+  LogOut, Settings, UserCircle, MapPin, Flame, Loader2,
+  ArrowLeftRight, RefreshCw, Headphones
 } from 'lucide-react';
 
+import { Suspense, lazy } from 'react';
+
 // Pages
-import Landing   from './pages/Landing';
-import Home      from './pages/Home';
-import Discovery from './pages/Discovery';
-import Marketplace from './pages/Marketplace';
-import Community from './pages/Community';
-import Profile   from './pages/Profile';
-import Dashboard from './pages/Dashboard';
-import RoleSelect from './pages/RoleSelect';
-import Tournaments from './pages/Tournaments';
-import VenueManager from './pages/VenueManager';
-import Auth from './pages/Auth';
-import SportsFeed from './pages/SportsFeed';
+const Landing = lazy(() => import('./pages/Landing'));
+const Home = lazy(() => import('./pages/Home'));
+const Discovery = lazy(() => import('./pages/Discovery'));
+const Marketplace = lazy(() => import('./pages/Marketplace'));
+const Profile = lazy(() => import('./pages/Profile'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const RoleSelect = lazy(() => import('./pages/RoleSelect'));
+const Tournaments = lazy(() => import('./pages/Tournaments'));
+const VenueManager = lazy(() => import('./pages/VenueManager'));
+const Auth = lazy(() => import('./pages/Auth'));
+const SportsFeed = lazy(() => import('./pages/SportsFeed'));
+const Community = lazy(() => import('./pages/Community'));
+
+import { auth } from './services/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { apiFetchProfile, apiFetchProfileByEmail, apiSaveSavedProfile } from './services/db';
+import ProfileSwitcherModal from './components/ProfileSwitcherModal';
+import UserAvatar from './components/UserAvatar';
+import ErrorBoundary from './components/ErrorBoundary';
+import MatchRegulationsModal from './components/MatchRegulationsModal';
+import MatchCancellationModal from './components/MatchCancellationModal';
+import HostMatchRequestsModal from './components/HostMatchRequestsModal';
+import SupportModal from './components/SupportModal';
 
 /* ── helpers ─────────────────────────────────────────────── */
-const loadUser = () => {
-  try {
-    const s = localStorage.getItem('turfington_user');
-    return s ? JSON.parse(s) : null;
-  } catch { return null; }
-};
-
-const saveUser = (u) => {
-  try { localStorage.setItem('turfington_user', JSON.stringify(u)); } catch {}
-};
-
 const loadLocalState = (key, fallback) => {
   try {
     const s = localStorage.getItem(key);
@@ -47,19 +50,93 @@ const saveLocalState = (key, val) => {
    APP ROOT
    ════════════════════════════════════════════════════════════ */
 export default function App() {
-  /* ── auth & role ─────────────────────────────────────────── */
-  const [user, setUser] = useState(loadUser);                 // null → show Auth
+  /* ── auth & profile state ─────────────────────────────────── */
+  const [activeProfile, setActiveProfile] = useState(() => loadLocalState('turfington_active_user', {
+    id: 'usr_amit_patel',
+    full_name: 'Amit Patel',
+    email: 'amit.patel@turfington.com',
+    role: 'player',
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
+    sport: 'Football & Cricket',
+    location: 'Anna Nagar, Chennai'
+  }));
+
+  const user = activeProfile;
+  const setUser = (newProfile) => {
+    setActiveProfile(newProfile);
+    if (newProfile) {
+      saveLocalState('turfington_active_user', newProfile);
+    }
+  };
+
+  const [firebaseUser, setFirebaseUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
   const [showRoleSelect, setShowRoleSelect] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
   const userMenuRef = useRef(null);
+
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        setFirebaseUser(fbUser);
+        // Only load if active profile is not set or matches current firebase user
+        if (!activeProfile || activeProfile.firebase_uid === fbUser.uid) {
+          let existingProfile = await apiFetchProfile(fbUser.uid);
+          if (!existingProfile && fbUser.email) {
+            existingProfile = await apiFetchProfileByEmail(fbUser.email);
+          }
+          if (existingProfile) {
+            setUser(existingProfile);
+          }
+        }
+      } else {
+        setFirebaseUser(null);
+      }
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleSwitchProfile = (selectedProfile) => {
+    if (!selectedProfile) return;
+
+    // Sanitize profile object with guaranteed fallback properties
+    const sanitized = {
+      id: selectedProfile.id || selectedProfile.firebase_uid || 'prof_' + Date.now(),
+      firebase_uid: selectedProfile.firebase_uid || selectedProfile.id || '',
+      full_name: selectedProfile.full_name || selectedProfile.name || 'Turfington Member',
+      email: selectedProfile.email || 'user@turfington.com',
+      username: selectedProfile.username || (selectedProfile.email || 'user').split('@')[0],
+      role: selectedProfile.role || 'player',
+      avatar: selectedProfile.avatar_url || selectedProfile.avatar || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
+      coverImage: selectedProfile.cover_image || selectedProfile.coverImage || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&q=80',
+      is_profile_complete: true,
+      socials: selectedProfile.socials || {}
+    };
+
+    // Update active profile in state & localStorage instantly
+    setUser(sanitized);
+    saveLocalState('turfington_active_user', sanitized);
+    
+    // Non-blocking database sync
+    apiSaveSavedProfile(sanitized, sanitized.email || sanitized.id).catch(() => {});
+
+    // Switch tab smoothly without crash or reload
+    if (sanitized.role === 'owner') {
+      setActiveTab('venue-manager');
+    } else {
+      setActiveTab('discovery');
+    }
+  };
 
 
   /* ── navigation ──────────────────────────────────────────── */
   const [activeTab, setActiveTab] = useState('landing');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [preSelectedSport, setPreSelectedSport] = useState('All');
-  const [communityActiveSubTab, setCommunityActiveSubTab] = useState(null);
-  const [openMarketplaceChatForProduct, setOpenMarketplaceChatForProduct] = useState(null);
+  const [showSupportModal, setShowSupportModal] = useState(false);
 
   const [venueOffers, setVenueOffers] = useState(() => loadLocalState('turfington_venue_offers', [
     { id: 1, venueId: 1, type: 'booking', title: '15% Off Weekday Evenings', discount: '15%', description: 'Applicable on bookings between Monday to Thursday 5pm to 8pm' },
@@ -71,6 +148,37 @@ export default function App() {
   const [cart, setCart] = useState(() => loadLocalState('turfington_cart', []));
   const [likedProducts, setLikedProducts] = useState(() => loadLocalState('turfington_liked_products', []));
   const [joinedMatches, setJoinedMatches] = useState(() => loadLocalState('turfington_joined_matches', [101]));
+  const [matchRequests, setMatchRequests] = useState(() => loadLocalState('turfington_match_requests', [
+    {
+      id: 'req_101_user',
+      matchId: 101,
+      userId: 'usr_amit_patel',
+      userName: 'Rahul Sharma',
+      userAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200',
+      status: 'approved',
+      seriousnessScore: 96,
+      loyaltyScore: 92,
+      punctualityScore: 98,
+      requestedAt: 'Yesterday, 6:00 PM'
+    },
+    {
+      id: 'req_102_user',
+      matchId: 102,
+      userId: 'usr_amit_patel',
+      userName: 'Ananya Verma',
+      userAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=200',
+      status: 'pending_approval',
+      seriousnessScore: 94,
+      loyaltyScore: 90,
+      punctualityScore: 96,
+      requestedAt: 'Today, 2:15 PM'
+    }
+  ]));
+
+  const [regulationsTargetMatch, setRegulationsTargetMatch] = useState(null);
+  const [cancellationTargetMatch, setCancellationTargetMatch] = useState(null);
+  const [hostReviewTargetMatch, setHostReviewTargetMatch] = useState(null);
+
   const [bookings, setBookings] = useState(() => loadLocalState('turfington_bookings', [
     { id: 99, title: 'Vanguard Astro Turf 1', sport: 'Football', time: 'Today, 8:00 PM', price: '₹1,200/hr',
       image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=400' }
@@ -93,8 +201,72 @@ export default function App() {
   }, [joinedMatches]);
 
   useEffect(() => {
+    saveLocalState('turfington_match_requests', matchRequests);
+  }, [matchRequests]);
+
+  useEffect(() => {
     saveLocalState('turfington_bookings', bookings);
   }, [bookings]);
+
+  /* ── Match Request Action Handlers ────────────────────────────── */
+  const handleRequestJoinMatch = (reqData) => {
+    const userId = user?.id || 'usr_curr';
+    const newReq = {
+      id: 'req_' + reqData.matchId + '_' + userId,
+      matchId: reqData.matchId,
+      userId,
+      userName: user?.full_name || user?.name || 'Current Player',
+      userAvatar: user?.avatar_url || user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200',
+      status: 'pending_approval',
+      acceptedRegulations: true,
+      seriousnessScore: 96,
+      loyaltyScore: 92,
+      punctualityScore: 98,
+      requestedAt: reqData.requestedAt
+    };
+
+    setMatchRequests(prev => {
+      const filtered = prev.filter(r => !(r.matchId === reqData.matchId && r.userId === userId));
+      return [...filtered, newReq];
+    });
+
+    setRegulationsTargetMatch(null);
+  };
+
+  const handleSubmitCancellation = (cData) => {
+    const userId = user?.id || 'usr_curr';
+    setMatchRequests(prev => prev.map(r => {
+      if (r.matchId === cData.matchId && (r.userId === userId || r.userId === 'usr_amit_patel')) {
+        return {
+          ...r,
+          status: 'cancellation_pending',
+          reasonCategory: cData.reasonCategory,
+          reasonDetails: cData.reasonDetails,
+          cancellationRequestedAt: cData.requestedAt
+        };
+      }
+      return r;
+    }));
+    setCancellationTargetMatch(null);
+  };
+
+  const handleHostAcceptJoin = (req) => {
+    setMatchRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'approved' } : r));
+    setJoinedMatches(prev => [...new Set([...prev, req.matchId])]);
+  };
+
+  const handleHostRejectJoin = (req) => {
+    setMatchRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'rejected' } : r));
+  };
+
+  const handleHostApproveCancellation = (req) => {
+    setMatchRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'cancelled' } : r));
+    setJoinedMatches(prev => prev.filter(mId => mId !== req.matchId));
+  };
+
+  const handleHostDeclineCancellation = (req) => {
+    setMatchRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'approved' } : r));
+  };
 
   /* ── close user menu on outside click ───────────────────── */
   useEffect(() => {
@@ -108,26 +280,26 @@ export default function App() {
 
   /* ── auth handlers ───────────────────────────────────────── */
   const handleLogin = (userData) => {
-    const full = { ...userData };
-    if (!full.role) {
+    // userData contains the Firebase profile after auth flow finishes
+    if (!userData.role) {
       setShowRoleSelect(true);
     }
-    saveUser(full);
-    setUser(full);
-    if (full.role) setActiveTab(full.role === 'owner' ? 'venue-manager' : 'discovery');
+    setUser(userData);
+    setActiveTab('landing');
   };
 
-  const handleRoleSelect = (selectedRole) => {
+  const handleRoleSelect = async (selectedRole) => {
+    // In a full implementation, you'd call apiUpdateProfile here
     const updated = { ...user, role: selectedRole };
-    saveUser(updated);
     setUser(updated);
     setShowRoleSelect(false);
-    setActiveTab(selectedRole === 'owner' ? 'venue-manager' : 'discovery');
+    setActiveTab('landing');
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('turfington_user');
+  const handleLogout = async () => {
+    await auth.signOut();
     setUser(null);
+    setFirebaseUser(null);
     setShowUserMenu(false);
     setActiveTab('landing');
     setMobileMenuOpen(false);
@@ -136,7 +308,21 @@ export default function App() {
 
 
   /* ── navigation ──────────────────────────────────────────── */
+  const isOwner = user?.role === 'owner';
+
+  useEffect(() => {
+    if (isOwner && activeTab === 'discovery') {
+      setActiveTab('venue-manager');
+    }
+  }, [isOwner, activeTab]);
+
   const handleNavClick = (tab) => {
+    if (isOwner && tab === 'discovery') {
+      setActiveTab('venue-manager');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setMobileMenuOpen(false);
+      return;
+    }
     setActiveTab(tab);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     setMobileMenuOpen(false);
@@ -149,14 +335,13 @@ export default function App() {
   };
 
   /* ── nav items ───────────────────────────────────────────── */
-  const isOwner = user?.role === 'owner';
   const navItems = isOwner
     ? [
         { id: 'landing',      label: 'Home' },
-        { id: 'sports-feed',  label: 'Sports Feed' },
+        { id: 'sports-feed',  label: 'Feed' },
+        { id: 'community',    label: 'Community' },
         { id: 'tournaments',  label: 'Tournaments' },
         { id: 'marketplace',  label: 'Marketplace' },
-        { id: 'community',    label: 'Communities' },
         { id: 'venue-manager', label: 'My Venues', badge: 'Owner' },
         { id: 'dashboard',    label: 'Bookings' },
         { id: 'profile',      label: 'Profile' },
@@ -164,15 +349,19 @@ export default function App() {
     : [
         { id: 'landing',      label: 'Home' },
         { id: 'discovery',    label: 'Discover' },
-        { id: 'sports-feed',  label: 'Sports Feed' },
+        { id: 'sports-feed',  label: 'Feed' },
+        { id: 'community',    label: 'Community' },
         { id: 'tournaments',  label: 'Tournaments' },
         { id: 'marketplace',  label: 'Marketplace' },
-        { id: 'community',    label: 'Communities' },
         { id: 'dashboard',    label: 'Your Bookings' },
         { id: 'profile',      label: 'Profile' },
       ];
 
   /* ─── Show Auth if not logged in ──────────────────────────── */
+  if (authLoading) {
+    return <div className="min-h-screen bg-[#080808] flex items-center justify-center text-white"><Loader2 className="w-8 h-8 animate-spin text-indigo-500" /></div>;
+  }
+
   if (!user) {
     return <Auth onLogin={handleLogin} />;
   }
@@ -223,17 +412,8 @@ export default function App() {
             <div className="relative">
               <button onClick={() => setShowUserMenu(!showUserMenu)}
                 className="flex items-center space-x-2.5 px-3 py-2 rounded-full border border-white/10 bg-white/[0.04] hover:bg-white/[0.07] transition-all group">
-                {user.avatar ? (
-                  <img src={user.avatar} alt={user.name}
-                    className="w-7 h-7 rounded-full object-cover border border-white/20 flex-shrink-0"
-                    onError={e => { e.target.onerror = null; e.target.src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'; }}
-                  />
-                ) : (
-                  <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                    {user.name?.[0]?.toUpperCase() || 'U'}
-                  </div>
-                )}
-                <span className="text-xs font-bold text-white max-w-[120px] truncate">{user.name}</span>
+                <UserAvatar user={user} className="w-7 h-7 text-xs" />
+                <span className="text-xs font-bold text-white max-w-[120px] truncate">{user.full_name}</span>
                 <ChevronDown className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
               </button>
 
@@ -244,7 +424,7 @@ export default function App() {
                     className="absolute right-0 top-full mt-2 w-56 bg-[#111] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50">
                     {/* User info header */}
                     <div className="px-4 py-3.5 border-b border-white/5">
-                      <p className="font-bold text-white text-sm">{user.name}</p>
+                      <p className="font-bold text-white text-sm">{user.full_name}</p>
                       <p className="text-[10px] text-neutral-500 mt-0.5 truncate">{user.email || user.phone || 'Turfington Member'}</p>
                       {user.role && (
                         <span className={`inline-flex mt-1.5 text-[9px] font-bold uppercase px-2 py-0.5 rounded-full border ${
@@ -254,14 +434,15 @@ export default function App() {
                     </div>
                     {/* Menu items */}
                     {[
+                      { icon: ArrowLeftRight, label: 'Switch Profile / Account', action: () => { setShowProfileSwitcher(true); setShowUserMenu(false); } },
                       { icon: UserCircle, label: 'My Profile', action: () => { handleNavClick('profile'); setShowUserMenu(false); } },
                       { icon: LayoutDashboard, label: 'Your Bookings', action: () => { handleNavClick('dashboard'); setShowUserMenu(false); } },
-
+                      { icon: Headphones, label: 'Help & Support', action: () => { setShowSupportModal(true); setShowUserMenu(false); } },
                       { icon: Settings, label: 'Settings', action: () => { handleNavClick('profile'); setShowUserMenu(false); } },
                     ].map(item => (
                       <button key={item.label} onClick={item.action}
                         className="w-full flex items-center gap-3 px-4 py-3 text-xs font-medium text-neutral-300 hover:bg-white/[0.04] hover:text-white transition-colors text-left">
-                        <item.icon className="w-4 h-4 text-neutral-500" />
+                        <item.icon className="w-4 h-4 text-indigo-400" />
                         {item.label}
                       </button>
                     ))}
@@ -293,12 +474,9 @@ export default function App() {
 
             {/* User chip */}
             <div className="flex items-center gap-3 mb-6 pb-5 border-b border-white/8">
-              {user.avatar
-                ? <img src={user.avatar} className="w-12 h-12 rounded-2xl object-cover border border-white/15" alt={user.name} onError={e => { e.target.onerror = null; e.target.src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120'; }} />
-                : <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white font-black text-lg">{user.name?.[0]?.toUpperCase()}</div>
-              }
+              <UserAvatar user={user} className="w-12 h-12 text-lg" />
               <div>
-                <p className="font-bold text-white">{user.name}</p>
+                <p className="font-bold text-white">{user.full_name}</p>
                 <p className="text-[10px] text-neutral-500">{user.email || user.phone || 'Turfington Member'}</p>
               </div>
             </div>
@@ -314,6 +492,12 @@ export default function App() {
             </div>
 
             <div className="pt-6 mt-4 border-t border-white/8 flex flex-col gap-3">
+              <button 
+                onClick={() => { setShowSupportModal(true); setMobileMenuOpen(false); }}
+                className="w-full py-3 bg-white/5 border border-white/10 text-white text-xs font-bold uppercase tracking-widest rounded-full hover:bg-white/10 transition-colors flex items-center justify-center gap-2">
+                <Headphones className="w-4 h-4 text-indigo-400" />
+                Support & Helpdesk
+              </button>
 
               <button onClick={handleLogout}
                 className="w-full py-3.5 bg-rose-600/20 border border-rose-500/20 text-rose-400 text-xs font-bold uppercase tracking-widest rounded-full">
@@ -324,59 +508,124 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* MAIN CONTENT */}
+      {/* MAIN CONTENT AREA */}
       <main className="flex-grow">
-        {activeTab === 'landing' && <Landing setTab={handleNavClick} onGetStarted={() => handleNavClick('home')} setPreSelectedSport={setPreSelectedSport} />}
-        {activeTab === 'home' && (
-          <Home setTab={handleNavClick} joinedMatches={joinedMatches} toggleJoinMatch={(id) =>
-            setJoinedMatches(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
-          } bookings={bookings} setBookings={setBookings} user={user} role={user?.role} />
-        )}
-        {activeTab === 'discovery' && (
-          <Discovery joinedMatches={joinedMatches}
-            toggleJoinMatch={(id) => setJoinedMatches(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
-            bookings={bookings} setBookings={setBookings} user={user}
-            initialSport={preSelectedSport} setInitialSport={setPreSelectedSport}
-            venueOffers={venueOffers} />
-        )}
-        {activeTab === 'marketplace' && (
-          <Marketplace 
-            likedProducts={likedProducts} 
-            setLikedProducts={setLikedProducts} 
-            onContactSeller={(product) => {
-              setCommunityActiveSubTab('marketplace');
-              setOpenMarketplaceChatForProduct(product);
-              handleNavClick('community');
-            }}
+        <ErrorBoundary key={activeTab + '_' + (user?.id || 'user')}>
+          <Suspense fallback={
+            <div className="min-h-screen bg-[#080808] flex items-center justify-center text-white">
+              <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+            </div>
+          }>
+            {activeTab === 'landing' && <Landing setTab={handleNavClick} onGetStarted={() => handleNavClick('home')} setPreSelectedSport={setPreSelectedSport} />}
+            {activeTab === 'home' && (
+              <Home 
+                setTab={handleNavClick} 
+                joinedMatches={joinedMatches} 
+                matchRequests={matchRequests}
+                onRequestJoinMatch={(m) => setRegulationsTargetMatch(m)}
+                onRequestCancelMatch={(m) => setCancellationTargetMatch(m)}
+                onOpenHostManager={(m) => setHostReviewTargetMatch(m)}
+                toggleJoinMatch={(id) =>
+                  setJoinedMatches(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+                } 
+                bookings={bookings} 
+                setBookings={setBookings} 
+                user={user} 
+                role={user?.role} 
+              />
+            )}
+            {activeTab === 'discovery' && !isOwner && (
+              <Discovery 
+                joinedMatches={joinedMatches}
+                matchRequests={matchRequests}
+                onRequestJoinMatch={(m) => setRegulationsTargetMatch(m)}
+                onRequestCancelMatch={(m) => setCancellationTargetMatch(m)}
+                onOpenHostManager={(m) => setHostReviewTargetMatch(m)}
+                toggleJoinMatch={(id) => setJoinedMatches(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+                bookings={bookings} setBookings={setBookings} user={user}
+                initialSport={preSelectedSport} setInitialSport={setPreSelectedSport}
+                venueOffers={venueOffers} 
+              />
+            )}
+            {activeTab === 'marketplace' && (
+              <Marketplace 
+                likedProducts={likedProducts} 
+                setLikedProducts={setLikedProducts} 
+                user={user}
+              />
+            )}
+            {activeTab === 'sports-feed' && <SportsFeed user={user} />}
+            {activeTab === 'community' && <Community user={user} setTab={handleNavClick} />}
+            {activeTab === 'tournaments' && <Tournaments role={user?.role} user={user} />}
+            {activeTab === 'venue-manager' && <VenueManager user={user} venueOffers={venueOffers} setVenueOffers={setVenueOffers} />}
+            {activeTab === 'profile' && (
+              <Profile user={user} role={user?.role}
+                onLogout={handleLogout}
+                onOpenProfileSwitcher={() => setShowProfileSwitcher(true)}
+                onUpdateUser={(newData) => {
+                  const updated = { ...user, ...newData };
+                  setUser(updated);
+                  if (updated.email) {
+                    try {
+                      const s = localStorage.getItem('turfington_accounts');
+                      const accounts = s ? JSON.parse(s) : {};
+                      accounts[updated.email.toLowerCase()] = { ...accounts[updated.email.toLowerCase()], ...updated };
+                      localStorage.setItem('turfington_accounts', JSON.stringify(accounts));
+                    } catch {}
+                  }
+                }} 
+              />
+            )}
+            {activeTab === 'dashboard' && <Dashboard user={user} role={user?.role} />}
+          </Suspense>
+        </ErrorBoundary>
+
+        {/* PROFILE SWITCHER MODAL */}
+        <ProfileSwitcherModal
+          isOpen={showProfileSwitcher}
+          onClose={() => setShowProfileSwitcher(false)}
+          activeUser={user}
+          onSelectProfile={handleSwitchProfile}
+        />
+
+        {/* MATCH REGULATIONS MODAL */}
+        {regulationsTargetMatch && (
+          <MatchRegulationsModal
+            match={regulationsTargetMatch}
+            user={user}
+            onClose={() => setRegulationsTargetMatch(null)}
+            onSubmitRequest={handleRequestJoinMatch}
           />
         )}
-        {activeTab === 'sports-feed' && <SportsFeed user={user} />}
-        {activeTab === 'community' && (
-          <Community 
-            user={user} 
-            initialSubTab={communityActiveSubTab}
-            setInitialSubTab={setCommunityActiveSubTab}
-            marketplaceChatProduct={openMarketplaceChatForProduct}
-            setMarketplaceChatProduct={setOpenMarketplaceChatForProduct}
+
+        {/* MATCH CANCELLATION MODAL */}
+        {cancellationTargetMatch && (
+          <MatchCancellationModal
+            match={cancellationTargetMatch}
+            user={user}
+            onClose={() => setCancellationTargetMatch(null)}
+            onSubmitCancellation={handleSubmitCancellation}
           />
         )}
-        {activeTab === 'tournaments' && <Tournaments role={user?.role} />}
-        {activeTab === 'venue-manager' && <VenueManager venueOffers={venueOffers} setVenueOffers={setVenueOffers} />}
-        {activeTab === 'profile' && (
-          <Profile user={user} role={user?.role}
-            onLogout={handleLogout}
-            onUpdateUser={(newData) => {
-              const updated = { ...user, ...newData };
-              saveUser(updated);
-              setUser(updated);
-            }}
-            setRole={(r) => {
-              const updated = { ...user, role: r };
-              saveUser(updated);
-              setUser(updated);
-            }} />
+
+        {/* HOST MATCH REQUESTS MANAGER MODAL */}
+        {hostReviewTargetMatch && (
+          <HostMatchRequestsModal
+            match={hostReviewTargetMatch}
+            requests={matchRequests.filter(r => r.matchId === hostReviewTargetMatch.id)}
+            onClose={() => setHostReviewTargetMatch(null)}
+            onAcceptJoin={handleHostAcceptJoin}
+            onRejectJoin={handleHostRejectJoin}
+            onApproveCancellation={handleHostApproveCancellation}
+            onDeclineCancellation={handleHostDeclineCancellation}
+          />
         )}
-        {activeTab === 'dashboard' && <Dashboard user={user} role={user?.role} />}
+
+        {/* SUPPORT MODAL */}
+        <SupportModal
+          isOpen={showSupportModal}
+          onClose={() => setShowSupportModal(false)}
+        />
       </main>
 
       {/* MOBILE BOTTOM TAB BAR */}
@@ -413,10 +662,16 @@ export default function App() {
       <footer className="py-8 bg-[#040404] border-t border-white/5 text-center text-xs text-neutral-500 font-light pb-28 xl:pb-8">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p>© 2026 Turfington Platform. Made in India 🇮🇳</p>
-          <div className="flex space-x-4">
+          <div className="flex space-x-4 items-center">
             <a href="#" className="hover:text-white transition-colors">Privacy</a>
             <a href="#" className="hover:text-white transition-colors">Terms</a>
-            <a href="#" className="hover:text-white transition-colors">Support</a>
+            <button 
+              type="button" 
+              onClick={() => setShowSupportModal(true)} 
+              className="hover:text-white transition-colors cursor-pointer"
+            >
+              Support
+            </button>
           </div>
         </div>
       </footer>

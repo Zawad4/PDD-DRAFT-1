@@ -1,0 +1,2589 @@
+import { db, auth, storage } from './firebase';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  orderBy, 
+  limit, 
+  onSnapshot, 
+  serverTimestamp,
+  arrayUnion,
+  arrayRemove,
+  increment,
+  or
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { deleteUser, signOut, reauthenticateWithPopup, GoogleAuthProvider } from 'firebase/auth';
+
+/* ── Timeout Helper ─────────────────────────────────────────── */
+async function withTimeout(promise, ms = 2000) {
+  let timer;
+  const timeoutPromise = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ isTimeout: true }), ms);
+  });
+  try {
+    const res = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timer);
+    if (res && res.isTimeout) {
+      return { data: null, error: { message: 'Request timed out' } };
+    }
+    return { data: res, error: null };
+  } catch (err) {
+    clearTimeout(timer);
+    return { data: null, error: err };
+  }
+}
+
+/* ── Local Profile Cache Helpers ────────────────────────────── */
+const getLocalProfile = (firebaseUid) => {
+  try {
+    const stored = localStorage.getItem('turfington_profile_' + firebaseUid);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setLocalProfile = (profile) => {
+  if (!profile) return;
+  try {
+    const serialized = JSON.stringify(profile);
+    if (profile.firebase_uid) {
+      localStorage.setItem('turfington_profile_' + profile.firebase_uid, serialized);
+    }
+    if (profile.id) {
+      localStorage.setItem('turfington_profile_' + profile.id, serialized);
+    }
+    localStorage.setItem('turfington_current_profile', serialized);
+    localStorage.setItem('turfington_active_user', serialized);
+    localStorage.setItem('turfington_user', serialized);
+
+    // Sync into turfington_accounts
+    const accStr = localStorage.getItem('turfington_accounts');
+    if (accStr && profile.email) {
+      const accounts = JSON.parse(accStr);
+      accounts[profile.email.trim().toLowerCase()] = profile;
+      localStorage.setItem('turfington_accounts', JSON.stringify(accounts));
+    }
+  } catch (err) {
+    console.warn('setLocalProfile error:', err);
+  }
+};
+
+// -- 1. Profiles ---------------------------------------------
+
+export async function apiFetchProfile(firebaseUid) {
+  if (!firebaseUid) return null;
+
+  // 1. Check local cache first for instant load
+  const cached = getLocalProfile(firebaseUid);
+  
+  // 2. Query Express backend server (shared cross-device database on localhost)
+  try {
+    const res = await fetch(`http://localhost:5000/api/profiles/${encodeURIComponent(firebaseUid)}`);
+    if (res.ok) {
+      const serverProfile = await res.json();
+      if (serverProfile) {
+        setLocalProfile(serverProfile);
+        return serverProfile;
+      }
+    }
+  } catch (e) {}
+
+  // 3. Query Firestore
+  try {
+    const docRef = doc(db, 'profiles', firebaseUid);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = { id: snap.id, ...snap.data() };
+      setLocalProfile(data);
+      return data;
+    }
+
+    const q = query(collection(db, 'profiles'), where('firebase_uid', '==', firebaseUid), limit(1));
+    const querySnap = await getDocs(q);
+    if (!querySnap.empty) {
+      const firstDoc = querySnap.docs[0];
+      const data = { id: firstDoc.id, ...firstDoc.data() };
+      setLocalProfile(data);
+      return data;
+    }
+  } catch (err) {
+    console.warn('Firestore apiFetchProfile error:', err);
+  }
+
+  // Fallback to cached
+  if (cached) return cached;
+  
+  try {
+    const current = localStorage.getItem('turfington_current_profile');
+    if (current) {
+      const p = JSON.parse(current);
+      if (p.firebase_uid === firebaseUid || p.id === firebaseUid) return p;
+    }
+  } catch {}
+  
+  return null;
+}
+
+export async function apiFetchProfileByEmail(email) {
+  if (!email) return null;
+  const cleanEmail = email.trim().toLowerCase();
+
+  // 1. Query Express backend server
+  try {
+    const res = await fetch(`http://localhost:5000/api/profiles/${encodeURIComponent(cleanEmail)}`);
+    if (res.ok) {
+      const serverProfile = await res.json();
+      if (serverProfile) {
+        setLocalProfile(serverProfile);
+        return serverProfile;
+      }
+    }
+  } catch (e) {}
+
+  // 2. Query Firestore
+  try {
+    const q = query(collection(db, 'profiles'), where('email', '==', cleanEmail), limit(1));
+    const querySnap = await getDocs(q);
+    if (!querySnap.empty) {
+      const firstDoc = querySnap.docs[0];
+      const data = { id: firstDoc.id, ...firstDoc.data() };
+      setLocalProfile(data);
+      return data;
+    }
+  } catch (err) {
+    console.warn('Firestore apiFetchProfileByEmail error:', err);
+  }
+
+  // 3. Check local saved profiles fallback
+  try {
+    const s = localStorage.getItem('turfington_accounts');
+    if (s) {
+      const accounts = JSON.parse(s);
+      const matched = accounts[cleanEmail];
+      if (matched) return matched;
+    }
+  } catch {}
+
+  return null;
+}
+
+export async function apiCreateProfile(profileData) {
+  const profileId = profileData.firebase_uid || profileData.id || ('usr_' + Date.now());
+  const email = profileData.email ? profileData.email.trim().toLowerCase() : '';
+
+  if (email && email !== 'googleuser@turfington.com') {
+    const existing = await apiFetchProfileByEmail(email);
+    if (existing && existing.id !== profileId && existing.firebase_uid !== profileId) {
+      if (profileData.isNewRegistration) {
+        const roleMsg = existing.role === 'player'
+          ? 'account already exist as player'
+          : existing.role === 'owner'
+          ? 'account already exist as venue owner'
+          : 'account already exist';
+        return { success: false, error: roleMsg };
+      } else {
+        const mergedProfile = {
+          ...existing,
+          ...profileData,
+          id: existing.id || profileId,
+          firebase_uid: profileId,
+          is_profile_complete: existing.is_profile_complete !== undefined ? existing.is_profile_complete : true
+        };
+
+        // Persist to server.js
+        fetch('http://localhost:5000/api/profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(mergedProfile)
+        }).catch(() => {});
+
+        try {
+          const userRef = doc(db, 'profiles', mergedProfile.id);
+          await setDoc(userRef, { ...mergedProfile, updatedAt: serverTimestamp() }, { merge: true });
+        } catch {}
+        setLocalProfile(mergedProfile);
+        return { success: true, profile: mergedProfile };
+      }
+    }
+  }
+
+  const profileToSave = {
+    id: profileId,
+    firebase_uid: profileId,
+    created_at: new Date().toISOString(),
+    is_profile_complete: profileData.is_profile_complete !== undefined 
+      ? profileData.is_profile_complete 
+      : (profileData.role ? true : false),
+    role: profileData.role || null,
+    ...profileData
+  };
+
+  // Persist to server.js
+  fetch('http://localhost:5000/api/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profileToSave)
+  }).catch(() => {});
+
+  // Persist to Firestore
+  try {
+    const userRef = doc(db, 'profiles', profileId);
+    await setDoc(userRef, {
+      ...profileToSave,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (err) {
+    console.error('Firestore apiCreateProfile error:', err);
+  }
+
+  setLocalProfile(profileToSave);
+  return { success: true, profile: profileToSave };
+}
+
+export async function apiUpdateProfile(profileId, updates) {
+  let existing = null;
+  try {
+    const cachedStr = localStorage.getItem('turfington_profile_' + profileId) || localStorage.getItem('turfington_current_profile');
+    if (cachedStr) existing = JSON.parse(cachedStr);
+  } catch {}
+
+  const updatedProfile = {
+    ...(existing || {}),
+    ...updates,
+    id: profileId,
+    updated_at: new Date().toISOString()
+  };
+
+  setLocalProfile(updatedProfile);
+
+  // Persist to Express server.js
+  fetch(`http://localhost:5000/api/profiles/${encodeURIComponent(profileId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updatedProfile)
+  }).catch(() => {});
+
+  // Firestore update
+  try {
+    const userRef = doc(db, 'profiles', profileId);
+    setDoc(userRef, {
+      ...updates,
+      updatedAt: serverTimestamp()
+    }, { merge: true }).catch(err => console.warn('Firestore apiUpdateProfile warning:', err));
+  } catch (e) {}
+
+  return { success: true, data: updatedProfile };
+}
+
+export function calculateAndUpdateDailyStreak(user) {
+  return user;
+}
+
+export async function apiFetchUserSavedProfiles(ownerEmailOrUid) {
+  if (!ownerEmailOrUid) return [];
+
+  try {
+    const q1 = query(collection(db, 'profiles'), where('owner_email', '==', ownerEmailOrUid));
+    const snap1 = await getDocs(q1);
+    const profiles = snap1.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    if (profiles.length > 0) return profiles;
+
+    const q2 = query(collection(db, 'profiles'), where('email', '==', ownerEmailOrUid));
+    const snap2 = await getDocs(q2);
+    const profiles2 = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (profiles2.length > 0) return profiles2;
+  } catch (err) {
+    console.warn('apiFetchUserSavedProfiles Firestore error:', err);
+  }
+
+  try {
+    const key = 'turfington_saved_profiles_' + ownerEmailOrUid;
+    const s = localStorage.getItem(key);
+    if (s) return JSON.parse(s);
+  } catch {}
+  return [];
+}
+
+export async function apiSaveSavedProfile(profileData, ownerEmailOrUid) {
+  const record = {
+    ...profileData,
+    owner_email: ownerEmailOrUid || profileData.email || profileData.firebase_uid,
+    updated_at: new Date().toISOString()
+  };
+
+  try {
+    const key = 'turfington_saved_profiles_' + (ownerEmailOrUid || 'default');
+    const s = localStorage.getItem(key);
+    const existing = s ? JSON.parse(s) : [];
+    const filtered = existing.filter(p => p.id !== record.id && p.email !== record.email);
+    const updated = [record, ...filtered];
+    localStorage.setItem(key, JSON.stringify(updated));
+  } catch {}
+
+  const pId = record.id || ('prof_' + Date.now());
+  setDoc(doc(db, 'profiles', pId), record, { merge: true }).catch(() => {});
+
+  return record;
+}
+
+export async function apiDeleteUserSavedProfile(profileId, ownerEmailOrUid) {
+  try {
+    const key = 'turfington_saved_profiles_' + (ownerEmailOrUid || 'default');
+    const s = localStorage.getItem(key);
+    if (s) {
+      const existing = JSON.parse(s);
+      const filtered = existing.filter(p => p.id !== profileId && p.firebase_uid !== profileId && p.email !== profileId && p.username !== profileId);
+      localStorage.setItem(key, JSON.stringify(filtered));
+    }
+  } catch {}
+
+  deleteDoc(doc(db, 'profiles', profileId)).catch(() => {});
+  deleteDoc(doc(db, 'users', profileId)).catch(() => {});
+  fetch(`http://localhost:5000/api/profiles/${encodeURIComponent(profileId)}`, { method: 'DELETE' }).catch(() => {});
+}
+
+export async function apiDeleteAccount(userOrIdentifier) {
+  if (!userOrIdentifier) return { success: false, error: 'No user or identifier provided' };
+
+  // 1. Collect all distinct user identifiers
+  const uids = new Set();
+  const emails = new Set();
+  const usernames = new Set();
+
+  if (typeof userOrIdentifier === 'object' && userOrIdentifier !== null) {
+    if (userOrIdentifier.id) uids.add(String(userOrIdentifier.id).trim());
+    if (userOrIdentifier.firebase_uid) uids.add(String(userOrIdentifier.firebase_uid).trim());
+    if (userOrIdentifier.uid) uids.add(String(userOrIdentifier.uid).trim());
+    if (userOrIdentifier.email) emails.add(String(userOrIdentifier.email).trim().toLowerCase());
+    if (userOrIdentifier.username) usernames.add(String(userOrIdentifier.username).trim().toLowerCase());
+  } else if (typeof userOrIdentifier === 'string' && userOrIdentifier.trim()) {
+    const raw = userOrIdentifier.trim();
+    if (raw.includes('@')) {
+      emails.add(raw.toLowerCase());
+    } else {
+      uids.add(raw);
+    }
+  }
+
+  // Also include current Firebase Auth user's identifiers if present
+  if (auth.currentUser) {
+    if (auth.currentUser.uid) uids.add(String(auth.currentUser.uid).trim());
+    if (auth.currentUser.email) emails.add(String(auth.currentUser.email).trim().toLowerCase());
+  }
+
+  console.log('🗑️ Completely deleting account for identifiers:', {
+    uids: Array.from(uids),
+    emails: Array.from(emails),
+    usernames: Array.from(usernames)
+  });
+
+  // 2. CRITICAL: Delete from Firestore Database FIRST while authenticated
+  try {
+    // 2a. Delete from 'profiles' collection
+    for (const uid of uids) {
+      await deleteDoc(doc(db, 'profiles', uid)).catch(() => {});
+      
+      const qUid = query(collection(db, 'profiles'), where('firebase_uid', '==', uid));
+      const sUid = await getDocs(qUid).catch(() => null);
+      if (sUid && !sUid.empty) {
+        for (const d of sUid.docs) {
+          await deleteDoc(doc(db, 'profiles', d.id)).catch(() => {});
+        }
+      }
+    }
+
+    for (const email of emails) {
+      const qEm = query(collection(db, 'profiles'), where('email', '==', email));
+      const sEm = await getDocs(qEm).catch(() => null);
+      if (sEm && !sEm.empty) {
+        for (const d of sEm.docs) {
+          await deleteDoc(doc(db, 'profiles', d.id)).catch(() => {});
+        }
+      }
+    }
+
+    for (const uname of usernames) {
+      const qUn1 = query(collection(db, 'profiles'), where('username_lowercase', '==', uname));
+      const sUn1 = await getDocs(qUn1).catch(() => null);
+      if (sUn1 && !sUn1.empty) {
+        for (const d of sUn1.docs) {
+          await deleteDoc(doc(db, 'profiles', d.id)).catch(() => {});
+        }
+      }
+      const qUn2 = query(collection(db, 'profiles'), where('username', '==', uname));
+      const sUn2 = await getDocs(qUn2).catch(() => null);
+      if (sUn2 && !sUn2.empty) {
+        for (const d of sUn2.docs) {
+          await deleteDoc(doc(db, 'profiles', d.id)).catch(() => {});
+        }
+      }
+    }
+
+    // 2b. Delete from 'users' collection
+    for (const uid of uids) {
+      await deleteDoc(doc(db, 'users', uid)).catch(() => {});
+
+      const qU = query(collection(db, 'users'), where('firebase_uid', '==', uid));
+      const sU = await getDocs(qU).catch(() => null);
+      if (sU && !sU.empty) {
+        for (const d of sU.docs) {
+          await deleteDoc(doc(db, 'users', d.id)).catch(() => {});
+        }
+      }
+    }
+
+    for (const email of emails) {
+      const qUem = query(collection(db, 'users'), where('email', '==', email));
+      const sUem = await getDocs(qUem).catch(() => null);
+      if (sUem && !sUem.empty) {
+        for (const d of sUem.docs) {
+          await deleteDoc(doc(db, 'users', d.id)).catch(() => {});
+        }
+      }
+    }
+
+    // 2c. Delete user bookings
+    for (const uid of uids) {
+      const qB1 = query(collection(db, 'bookings'), where('userId', '==', uid));
+      const sB1 = await getDocs(qB1).catch(() => null);
+      if (sB1 && !sB1.empty) {
+        for (const d of sB1.docs) await deleteDoc(doc(db, 'bookings', d.id)).catch(() => {});
+      }
+      const qB2 = query(collection(db, 'bookings'), where('user_id', '==', uid));
+      const sB2 = await getDocs(qB2).catch(() => null);
+      if (sB2 && !sB2.empty) {
+        for (const d of sB2.docs) await deleteDoc(doc(db, 'bookings', d.id)).catch(() => {});
+      }
+    }
+
+    // 2d. Delete user posts
+    for (const uid of uids) {
+      const qP1 = query(collection(db, 'posts'), where('userId', '==', uid));
+      const sP1 = await getDocs(qP1).catch(() => null);
+      if (sP1 && !sP1.empty) {
+        for (const d of sP1.docs) await deleteDoc(doc(db, 'posts', d.id)).catch(() => {});
+      }
+      const qP2 = query(collection(db, 'posts'), where('created_by', '==', uid));
+      const sP2 = await getDocs(qP2).catch(() => null);
+      if (sP2 && !sP2.empty) {
+        for (const d of sP2.docs) await deleteDoc(doc(db, 'posts', d.id)).catch(() => {});
+      }
+    }
+
+    // 2e. Delete friendships and follows
+    for (const uid of uids) {
+      const qF1 = query(collection(db, 'friendships'), where('sender_id', '==', uid));
+      const sF1 = await getDocs(qF1).catch(() => null);
+      if (sF1 && !sF1.empty) {
+        for (const d of sF1.docs) await deleteDoc(doc(db, 'friendships', d.id)).catch(() => {});
+      }
+      const qF2 = query(collection(db, 'friendships'), where('receiver_id', '==', uid));
+      const sF2 = await getDocs(qF2).catch(() => null);
+      if (sF2 && !sF2.empty) {
+        for (const d of sF2.docs) await deleteDoc(doc(db, 'friendships', d.id)).catch(() => {});
+      }
+
+      const qFol1 = query(collection(db, 'follows'), where('follower_id', '==', uid));
+      const sFol1 = await getDocs(qFol1).catch(() => null);
+      if (sFol1 && !sFol1.empty) {
+        for (const d of sFol1.docs) await deleteDoc(doc(db, 'follows', d.id)).catch(() => {});
+      }
+      const qFol2 = query(collection(db, 'follows'), where('following_id', '==', uid));
+      const sFol2 = await getDocs(qFol2).catch(() => null);
+      if (sFol2 && !sFol2.empty) {
+        for (const d of sFol2.docs) await deleteDoc(doc(db, 'follows', d.id)).catch(() => {});
+      }
+    }
+  } catch (firestoreErr) {
+    console.error('Error during Firestore account deletion:', firestoreErr);
+  }
+
+  // 3. Delete from backend Express server database (turfington_db.json)
+  const allIdsToDelete = [...uids, ...emails];
+  for (const idTarget of allIdsToDelete) {
+    try {
+      await fetch(`http://localhost:5000/api/profiles/${encodeURIComponent(idTarget)}`, {
+        method: 'DELETE'
+      });
+    } catch {}
+  }
+
+  // 4. Delete user completely from Firebase Authentication
+  let authDeleted = false;
+  try {
+    if (auth.currentUser) {
+      try {
+        await deleteUser(auth.currentUser);
+        authDeleted = true;
+        console.log('✅ Firebase Authentication user deleted successfully.');
+      } catch (authErr) {
+        if (authErr.code === 'auth/requires-recent-login') {
+          console.warn('⚠️ Requires recent login to delete Firebase Auth user. Reauthenticating...');
+          const isGoogleUser = auth.currentUser.providerData?.some(p => p.providerId === 'google.com');
+          if (isGoogleUser) {
+            try {
+              const provider = new GoogleAuthProvider();
+              await reauthenticateWithPopup(auth.currentUser, provider);
+              await deleteUser(auth.currentUser);
+              authDeleted = true;
+              console.log('✅ Firebase Auth user deleted after Google re-auth.');
+            } catch (reauthErr) {
+              console.error('Google re-authentication failed:', reauthErr);
+              throw new Error('Please re-authenticate with Google before deleting your account.');
+            }
+          } else {
+            throw new Error('For security, please sign out and sign back in before deleting your account.');
+          }
+        } else {
+          console.error('Firebase Auth deletion error:', authErr);
+          throw authErr;
+        }
+      }
+    } else {
+      console.log('No active auth.currentUser found in Firebase Auth session.');
+    }
+  } finally {
+    try { await signOut(auth); } catch {}
+  }
+
+  // 5. Completely purge localStorage and cached sessions
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (
+        key === 'turfington_current_profile' ||
+        key === 'turfington_active_user' ||
+        key === 'turfington_user' ||
+        key === 'userRole' ||
+        key.startsWith('turfington_profile_')
+      ) {
+        keysToRemove.push(key);
+      } else if (key.startsWith('turfington_saved_profiles_')) {
+        const str = localStorage.getItem(key);
+        if (str) {
+          try {
+            const list = JSON.parse(str);
+            const filtered = list.filter(p => {
+              const pId = p.id || p.firebase_uid;
+              const pEmail = (p.email || '').toLowerCase();
+              return !uids.has(String(pId)) && !emails.has(pEmail);
+            });
+            localStorage.setItem(key, JSON.stringify(filtered));
+          } catch {}
+        }
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+
+    // Also remove from saved accounts list
+    const accountsStr = localStorage.getItem('turfington_accounts');
+    if (accountsStr) {
+      try {
+        const accounts = JSON.parse(accountsStr);
+        Object.keys(accounts).forEach(k => {
+          const acc = accounts[k];
+          if (
+            uids.has(String(acc.id)) ||
+            uids.has(String(acc.firebase_uid)) ||
+            emails.has((acc.email || '').toLowerCase()) ||
+            usernames.has((acc.username || '').toLowerCase()) ||
+            emails.has(k.toLowerCase())
+          ) {
+            delete accounts[k];
+          }
+        });
+        localStorage.setItem('turfington_accounts', JSON.stringify(accounts));
+      } catch {}
+    }
+  } catch (lsErr) {
+    console.warn('LocalStorage cleanup error:', lsErr);
+  }
+
+  return { success: true, authDeleted };
+}
+
+export async function apiCheckUsernameUnique(username) {
+  if (!username) return true;
+  const cleanUsername = username.trim().toLowerCase();
+
+  try {
+    const q = query(collection(db, 'profiles'), where('username_lowercase', '==', cleanUsername), limit(1));
+    const snap = await getDocs(q);
+    if (!snap.empty) return false;
+
+    const q2 = query(collection(db, 'profiles'), where('username', '==', username.trim()), limit(1));
+    const snap2 = await getDocs(q2);
+    return snap2.empty;
+  } catch (err) {
+    console.error('Check username unique error:', err);
+    return true;
+  }
+}
+
+export async function apiSearchUsers(queryStr, currentUserId = null) {
+  if (!queryStr || !queryStr.trim()) return [];
+  const clean = queryStr.trim().toLowerCase().replace('@', '');
+
+  try {
+    const snap = await getDocs(collection(db, 'profiles'));
+    const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    return users.filter(u => {
+      if (currentUserId && (u.id === currentUserId || u.firebase_uid === currentUserId)) return false;
+      const uName = (u.username || '').toLowerCase();
+      const fName = (u.full_name || u.name || '').toLowerCase();
+      const email = (u.email || '').toLowerCase();
+      return uName.includes(clean) || fName.includes(clean) || email.includes(clean);
+    });
+  } catch (err) {
+    console.warn('apiSearchUsers Firestore error:', err);
+    return [];
+  }
+}
+
+export async function apiFetchNearbyPlayers(lat, lng, radiusKm = 50, currentUserId = null) {
+  const userLat = lat || 13.0827;
+  const userLng = lng || 80.2707;
+
+  try {
+    const snap = await getDocs(collection(db, 'profiles'));
+    let data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    if (currentUserId) {
+      data = data.filter(p => p.id !== currentUserId && p.firebase_uid !== currentUserId);
+    }
+
+    const toRad = (v) => (v * Math.PI) / 180;
+    const haversineDist = (lat1, lon1, lat2, lon2) => {
+      const R = 6371; // km
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return parseFloat((R * c).toFixed(1));
+    };
+
+    return data
+      .map(p => {
+        const pLat = p.lat || 13.0741;
+        const pLng = p.lng || 80.2326;
+        const distNum = haversineDist(userLat, userLng, pLat, pLng);
+        return {
+          ...p,
+          lat: pLat,
+          lng: pLng,
+          distanceNum: distNum,
+          distanceText: `${distNum} km away`
+        };
+      })
+      .filter(p => p.distanceNum <= radiusKm)
+      .sort((a, b) => a.distanceNum - b.distanceNum);
+  } catch (err) {
+    console.warn('apiFetchNearbyPlayers error:', err);
+    return [];
+  }
+}
+
+
+// -- 2. Friendships & Follows --------------------------------
+
+export async function apiFollowUser(followerId, followingId) {
+  try {
+    const docId = `${followerId}_${followingId}`;
+    await setDoc(doc(db, 'follows', docId), {
+      follower_id: followerId,
+      following_id: followingId,
+      createdAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    console.error('apiFollowUser error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function apiUnfollowUser(followerId, followingId) {
+  try {
+    const docId = `${followerId}_${followingId}`;
+    await deleteDoc(doc(db, 'follows', docId));
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function apiFetchFriends(userId) {
+  try {
+    const q1 = query(collection(db, 'friendships'), where('sender_id', '==', userId));
+    const q2 = query(collection(db, 'friendships'), where('receiver_id', '==', userId));
+
+    const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+    const allDocs = [...snap1.docs, ...snap2.docs];
+
+    const friends = [];
+    const incomingRequests = [];
+    const sentRequests = [];
+
+    allDocs.forEach(d => {
+      const f = { id: d.id, ...d.data() };
+      const isSender = f.sender_id === userId;
+      const friendProfile = isSender ? f.receiver : f.sender;
+      const item = {
+        id: f.id,
+        friendship_id: f.id,
+        status: f.status,
+        isSender,
+        sender: f.sender,
+        receiver: f.receiver,
+        ...(friendProfile || {})
+      };
+
+      if (f.status === 'accepted') {
+        friends.push(item);
+      } else if (f.status === 'pending') {
+        if (isSender) {
+          sentRequests.push(item);
+        } else {
+          incomingRequests.push(item);
+        }
+      }
+    });
+
+    return { friends, incomingRequests, sentRequests };
+  } catch (err) {
+    console.error("Error in apiFetchFriends:", err);
+    return { friends: [], incomingRequests: [], sentRequests: [] };
+  }
+}
+
+export async function apiSendFriendRequest(senderId, receiverId) {
+  try {
+    const docId = `fr_${senderId}_${receiverId}`;
+    await setDoc(doc(db, 'friendships', docId), {
+      sender_id: senderId,
+      receiver_id: receiverId,
+      status: 'pending',
+      createdAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function apiRespondFriendRequest(friendshipId, status) {
+  try {
+    if (status === 'deleted') {
+      await deleteDoc(doc(db, 'friendships', friendshipId));
+    } else {
+      await updateDoc(doc(db, 'friendships', friendshipId), { status });
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+
+// -- 3. Real-Time Communication System ----------------------
+export * from './chatService';
+
+export const DEFAULT_COMMUNITY_GROUPS = [
+  {
+    id: 'group_football_chennai',
+    name: '⚽ Chennai Football Turf Hub',
+    sport: 'Football',
+    type: 'group',
+    is_public: true,
+    avatar: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=600',
+    description: 'Weekly 7v7 turf matches, tactical meetups, and friendly amateur leagues across Chennai.',
+    participants: ['usr_amit_patel', 'usr_rahul', 'usr_priya'],
+    members_count: 48,
+    created_by: 'usr_amit_patel',
+    lastMessage: {
+      text: 'Anyone up for 7v7 this Friday 7 PM at Astro Turf?',
+      sender_id: 'usr_rahul',
+      sender_name: 'Rahul Sharma',
+      timestamp: Date.now() - 1000 * 60 * 15
+    },
+    lastMessageText: 'Anyone up for 7v7 this Friday 7 PM at Astro Turf?',
+    lastMessageSender: 'Rahul Sharma',
+    lastMessageTime: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+    unreadCounts: { usr_amit_patel: 0 }
+  },
+  {
+    id: 'group_box_cricket',
+    name: '🏏 Box Cricket Warriors',
+    sport: 'Cricket',
+    type: 'group',
+    is_public: true,
+    avatar: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?q=80&w=600',
+    description: 'Fast-paced box cricket tournaments, night matches, and weekend nets. Batsmen & bowlers welcome!',
+    participants: ['usr_amit_patel', 'usr_rahul'],
+    members_count: 62,
+    created_by: 'usr_rahul',
+    lastMessage: {
+      text: 'Need 2 more players for tomorrow night box cricket at Turf Together!',
+      sender_id: 'usr_priya',
+      sender_name: 'Priya Sharma',
+      timestamp: Date.now() - 1000 * 60 * 45
+    },
+    lastMessageText: 'Need 2 more players for tomorrow night box cricket at Turf Together!',
+    lastMessageSender: 'Priya Sharma',
+    lastMessageTime: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
+    unreadCounts: { usr_amit_patel: 1 }
+  },
+  {
+    id: 'group_badminton_smashers',
+    name: '🏸 Smashers Badminton Club',
+    sport: 'Badminton',
+    type: 'group',
+    is_public: true,
+    avatar: 'https://images.unsplash.com/photo-1521537634581-0ddea2ffe31a?q=80&w=600',
+    description: 'Wooden and synthetic court doubles, high-intensity rallies, and morning coaching sessions.',
+    participants: ['usr_amit_patel'],
+    members_count: 35,
+    created_by: 'usr_amit_patel',
+    lastMessage: {
+      text: 'Court 3 booked for Sunday morning 7 AM. Who is joining for doubles?',
+      sender_id: 'usr_amit_patel',
+      sender_name: 'Amit Patel',
+      timestamp: Date.now() - 1000 * 60 * 120
+    },
+    lastMessageText: 'Court 3 booked for Sunday morning 7 AM. Who is joining for doubles?',
+    lastMessageSender: 'Amit Patel',
+    lastMessageTime: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
+    unreadCounts: { usr_amit_patel: 0 }
+  },
+  {
+    id: 'group_pickleball_padel',
+    name: '🎾 Padel & Pickleball Aces',
+    sport: 'Pickleball',
+    type: 'group',
+    is_public: true,
+    avatar: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?q=80&w=600',
+    description: 'Chennai’s premier racket community. Discover paddle sports, casual doubles, and coaching drills.',
+    participants: ['usr_rahul', 'usr_priya'],
+    members_count: 27,
+    created_by: 'usr_priya',
+    lastMessage: {
+      text: 'New outdoor pickleball court open in Anna Nagar! Let us test it out.',
+      sender_id: 'usr_priya',
+      sender_name: 'Priya Sharma',
+      timestamp: Date.now() - 1000 * 60 * 240
+    },
+    lastMessageText: 'New outdoor pickleball court open in Anna Nagar! Let us test it out.',
+    lastMessageSender: 'Priya Sharma',
+    lastMessageTime: new Date(Date.now() - 1000 * 60 * 240).toISOString(),
+    unreadCounts: { usr_amit_patel: 0 }
+  },
+  {
+    id: 'group_table_tennis',
+    name: '🏓 Table Tennis Spinners',
+    sport: 'Table Tennis',
+    type: 'group',
+    is_public: true,
+    avatar: 'https://images.unsplash.com/photo-1611251135345-18c56206b863?q=80&w=600',
+    description: 'Ping pong enthusiasts, spin-masters, and local tournament coordination.',
+    participants: ['usr_amit_patel'],
+    members_count: 19,
+    created_by: 'usr_amit_patel',
+    lastMessage: {
+      text: 'Practicing backhand loops tonight at 8 PM at Elite TT Club.',
+      sender_id: 'usr_amit_patel',
+      sender_name: 'Amit Patel',
+      timestamp: Date.now() - 1000 * 60 * 360
+    },
+    lastMessageText: 'Practicing backhand loops tonight at 8 PM at Elite TT Club.',
+    lastMessageSender: 'Amit Patel',
+    lastMessageTime: new Date(Date.now() - 1000 * 60 * 360).toISOString(),
+    unreadCounts: { usr_amit_patel: 0 }
+  },
+  {
+    id: 'group_strike_bowling',
+    name: '🎳 Strike Bowling Squad',
+    sport: 'Bowling',
+    type: 'group',
+    is_public: true,
+    avatar: 'https://images.unsplash.com/photo-1545232979-fbf68fe9b10d?q=80&w=600',
+    description: '10-pin bowling nights, high score leaderboards, and weekend squad socials.',
+    participants: ['usr_rahul'],
+    members_count: 22,
+    created_by: 'usr_rahul',
+    lastMessage: {
+      text: 'Who has a score above 180? Team challenge this Saturday!',
+      sender_id: 'usr_rahul',
+      sender_name: 'Rahul Sharma',
+      timestamp: Date.now() - 1000 * 60 * 480
+    },
+    lastMessageText: 'Who has a score above 180? Team challenge this Saturday!',
+    lastMessageSender: 'Rahul Sharma',
+    lastMessageTime: new Date(Date.now() - 1000 * 60 * 480).toISOString(),
+    unreadCounts: { usr_amit_patel: 0 }
+  }
+];
+
+/**
+ * Ensures default sports groups exist in Firestore permanently
+ */
+export async function apiEnsureDefaultSportsGroups() {
+  try {
+    for (const group of DEFAULT_COMMUNITY_GROUPS) {
+      const convRef = doc(db, 'conversations', group.id);
+      const snap = await getDoc(convRef);
+      if (!snap.exists()) {
+        await setDoc(convRef, {
+          ...group,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+
+        // Seed initial message in group
+        const msgRef = doc(collection(db, 'conversations', group.id, 'messages'));
+        await setDoc(msgRef, {
+          conversation_id: group.id,
+          sender_id: group.lastMessage.sender_id,
+          user: group.lastMessage.sender_name,
+          avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${group.lastMessage.sender_id}`,
+          content: group.lastMessage.text,
+          text: group.lastMessage.text,
+          status: 'sent',
+          createdAt: serverTimestamp(),
+          created_at: group.lastMessageTime
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("apiEnsureDefaultSportsGroups notice:", e);
+  }
+}
+
+/**
+ * Real-time continuous listener for all conversations involving a user
+ */
+export function subscribeToUserConversations(userId, onUpdate) {
+  if (!userId) return () => {};
+
+  let directChats = [];
+  let groupChats = [];
+
+  const notify = () => {
+    const map = new Map();
+    // Default fallback groups in case Firestore is connecting
+    DEFAULT_COMMUNITY_GROUPS.forEach(g => map.set(g.id, { ...g }));
+
+    // Overlay real group chats
+    groupChats.forEach(g => map.set(g.id, g));
+
+    // Overlay direct chats
+    directChats.forEach(d => map.set(d.id, d));
+
+    const merged = Array.from(map.values()).sort((a, b) => {
+      const tA = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : new Date(a.lastMessageTime || a.createdAt || 0).getTime();
+      const tB = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : new Date(b.lastMessageTime || b.createdAt || 0).getTime();
+      return tB - tA;
+    });
+
+    onUpdate(merged);
+  };
+
+  try {
+    // 1. Direct chats where user is a participant
+    const directQuery = query(
+      collection(db, 'conversations'),
+      where('participants', 'array-contains', userId)
+    );
+    const unsubDirect = onSnapshot(directQuery, (snap) => {
+      directChats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      notify();
+    }, (err) => console.warn('direct conversations sub notice:', err));
+
+    // 2. Public Sports Groups
+    const groupQuery = query(
+      collection(db, 'conversations'),
+      where('type', '==', 'group')
+    );
+    const unsubGroup = onSnapshot(groupQuery, (snap) => {
+      groupChats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      notify();
+    }, (err) => console.warn('group conversations sub notice:', err));
+
+    return () => {
+      unsubDirect();
+      unsubGroup();
+    };
+  } catch (err) {
+    console.warn('subscribeToUserConversations error:', err);
+    notify();
+    return () => {};
+  }
+}
+
+export async function apiFetchChats(userId) {
+  try {
+    const q = query(collection(db, 'conversations'), where('participants', 'array-contains', userId));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+
+    // Express backend fallback
+    const res = await fetch(`http://localhost:5000/api/chats?userId=${userId}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.chats) return json.chats;
+    }
+  } catch (err) {
+    console.warn("apiFetchChats error:", err);
+  }
+  return DEFAULT_COMMUNITY_GROUPS;
+}
+
+export async function apiCreateDirectChat(user1, user2) {
+  const u1Id = typeof user1 === 'string' ? user1 : (user1.id || user1.uid || user1.firebase_uid);
+  const u2Id = typeof user2 === 'string' ? user2 : (user2.id || user2.uid || user2.firebase_uid);
+  const u1Name = typeof user1 === 'object' ? (user1.full_name || user1.name || 'Athlete') : 'Athlete';
+  const u2Name = typeof user2 === 'object' ? (user2.full_name || user2.name || 'Athlete') : 'Athlete';
+  const u1Avatar = typeof user1 === 'object' ? (user1.avatar || user1.avatar_url || '') : '';
+  const u2Avatar = typeof user2 === 'object' ? (user2.avatar || user2.avatar_url || '') : '';
+
+  const deterministicId = 'dm_' + [u1Id, u2Id].sort().join('_');
+  try {
+    const convRef = doc(db, 'conversations', deterministicId);
+    const snap = await getDoc(convRef);
+    if (snap.exists()) {
+      return { success: true, chat: { id: snap.id, ...snap.data() } };
+    }
+
+    const chatData = {
+      id: deterministicId,
+      type: 'direct',
+      created_by: u1Id,
+      name: u2Name,
+      avatar: u2Avatar,
+      participants: [u1Id, u2Id],
+      participantDetails: {
+        [u1Id]: { id: u1Id, name: u1Name, avatar: u1Avatar },
+        [u2Id]: { id: u2Id, name: u2Name, avatar: u2Avatar }
+      },
+      unreadCounts: {
+        [u1Id]: 0,
+        [u2Id]: 0
+      },
+      lastMessage: null,
+      lastMessageText: '',
+      lastMessageTime: new Date().toISOString(),
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp()
+    };
+
+    await setDoc(convRef, chatData);
+    return { success: true, chat: chatData };
+  } catch (e) {
+    console.warn("apiCreateDirectChat Firestore notice:", e);
+  }
+
+  return {
+    success: true,
+    chat: {
+      id: deterministicId,
+      type: 'direct',
+      name: u2Name,
+      avatar: u2Avatar,
+      participants: [u1Id, u2Id],
+      participantDetails: {
+        [u1Id]: { id: u1Id, name: u1Name, avatar: u1Avatar },
+        [u2Id]: { id: u2Id, name: u2Name, avatar: u2Avatar }
+      },
+      unreadCounts: { [u1Id]: 0, [u2Id]: 0 }
+    }
+  };
+}
+
+export async function apiCreateGroupChat({ name, avatar, createdBy, memberIds, sport = 'Football', description = '', type = 'group' }) {
+  try {
+    const allMembers = Array.from(new Set([createdBy, ...(memberIds || [])].filter(Boolean)));
+    const groupId = 'group_' + Date.now();
+    const groupData = {
+      id: groupId,
+      name,
+      sport,
+      description,
+      avatar: avatar || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=600',
+      type,
+      is_public: true,
+      created_by: createdBy,
+      participants: allMembers,
+      members_count: allMembers.length,
+      unreadCounts: {},
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+
+    const docRef = doc(db, 'conversations', groupId);
+    await setDoc(docRef, groupData);
+    return { success: true, chat: groupData };
+  } catch (e) {
+    console.warn("apiCreateGroupChat Firestore error:", e);
+    return { success: false };
+  }
+}
+
+export async function apiJoinGroup(conversationId, user) {
+  const userId = user?.id || user?.uid || user?.firebase_uid;
+  if (!userId) return { success: false };
+  try {
+    const convRef = doc(db, 'conversations', conversationId);
+    await updateDoc(convRef, {
+      participants: arrayUnion(userId),
+      members_count: increment(1)
+    });
+
+    const memberRef = doc(db, 'conversations', conversationId, 'members', userId);
+    await setDoc(memberRef, {
+      userId,
+      name: user.full_name || user.name || 'Athlete',
+      avatar: user.avatar || user.avatar_url || '',
+      joinedAt: serverTimestamp(),
+      role: 'member'
+    }, { merge: true });
+
+    return { success: true };
+  } catch (err) {
+    console.warn('apiJoinGroup Firestore error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function apiLeaveGroup(conversationId, user) {
+  const userId = user?.id || user?.uid || user?.firebase_uid;
+  if (!userId) return { success: false };
+  try {
+    const convRef = doc(db, 'conversations', conversationId);
+    await updateDoc(convRef, {
+      participants: arrayRemove(userId),
+      members_count: increment(-1)
+    });
+
+    const memberRef = doc(db, 'conversations', conversationId, 'members', userId);
+    await deleteDoc(memberRef).catch(() => {});
+    return { success: true };
+  } catch (err) {
+    console.warn('apiLeaveGroup Firestore error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function apiCreateEntityChat({ type, entityId, createdBy, targetUserId, title, avatar, metadata }) {
+  try {
+    const q = query(
+      collection(db, 'conversations'),
+      where('type', '==', type),
+      where('entity_id', '==', String(entityId)),
+      where('created_by', '==', createdBy),
+      limit(1)
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const existingDoc = snap.docs[0];
+      return { success: true, chat: { id: existingDoc.id, ...existingDoc.data() } };
+    }
+
+    const members = Array.from(new Set([createdBy, targetUserId].filter(Boolean)));
+    const chatData = {
+      type,
+      entity_id: String(entityId),
+      title,
+      avatar_url: avatar,
+      created_by: createdBy,
+      participants: members,
+      metadata: metadata || {},
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+
+    const docRef = await addDoc(collection(db, 'conversations'), chatData);
+    return { success: true, chat: { id: docRef.id, ...chatData } };
+  } catch (e) {
+    console.warn("apiCreateEntityChat error:", e);
+    return { success: false };
+  }
+}
+
+export async function apiFetchMessages(conversationId) {
+  try {
+    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch (err) {
+    console.warn("apiFetchMessages Firestore notice:", err);
+  }
+
+  // Server fallback
+  try {
+    const res = await fetch(`http://localhost:5000/api/messages?chatId=${conversationId}`);
+    if (res.ok) {
+      const json = await res.json();
+      return json.messages || [];
+    }
+  } catch (err) {
+    console.error("apiFetchMessages server error:", err);
+  }
+
+  return [];
+}
+
+export async function apiSendMessage(conversationId, senderId, content, replyToId = null, attachments = [], idempotencyKey = null, senderInfo = null) {
+  try {
+    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+    const senderName = senderInfo?.name || senderInfo?.full_name || senderInfo?.user || 'Athlete';
+    const senderAvatar = senderInfo?.avatar || senderInfo?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${senderId}`;
+
+    const msgData = {
+      conversation_id: conversationId,
+      sender_id: senderId,
+      user: senderName,
+      avatar: senderAvatar,
+      sender: {
+        id: senderId,
+        full_name: senderName,
+        avatar_url: senderAvatar
+      },
+      content,
+      text: content,
+      reply_to_id: replyToId,
+      status: 'sent',
+      idempotency_key: idempotencyKey,
+      attachments: attachments || [],
+      reactions: [],
+      createdAt: serverTimestamp(),
+      created_at: new Date().toISOString()
+    };
+
+    const docRef = await addDoc(messagesRef, msgData);
+    const newMsg = { id: docRef.id, ...msgData };
+
+    // Update conversation document: last message, unread counts, updatedAt
+    const convRef = doc(db, 'conversations', conversationId);
+    try {
+      const convSnap = await getDoc(convRef);
+      if (convSnap.exists()) {
+        const convData = convSnap.data();
+        const participants = convData.participants || [];
+        const unreadUpdates = {};
+        participants.forEach(pUid => {
+          if (pUid !== senderId) {
+            unreadUpdates[`unreadCounts.${pUid}`] = increment(1);
+          }
+        });
+
+        await updateDoc(convRef, {
+          lastMessage: {
+            text: content,
+            sender_id: senderId,
+            sender_name: senderName,
+            timestamp: Date.now()
+          },
+          lastMessageText: content,
+          lastMessageSender: senderName,
+          lastMessageTime: new Date().toISOString(),
+          updatedAt: serverTimestamp(),
+          ...unreadUpdates
+        });
+      }
+    } catch (updateErr) {
+      console.warn("Conversation doc update notice:", updateErr);
+    }
+
+    // Express backend sync
+    fetch('http://localhost:5000/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId,
+        senderId,
+        content,
+        senderName,
+        senderAvatar,
+        attachments
+      })
+    }).catch(() => {});
+
+    return { success: true, message: newMsg };
+  } catch (e) {
+    console.warn("apiSendMessage Firestore error:", e);
+    // Express backend fallback
+    try {
+      const res = await fetch('http://localhost:5000/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId,
+          senderId,
+          content,
+          senderName: senderInfo?.name || 'Athlete',
+          senderAvatar: senderInfo?.avatar,
+          attachments
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { success: true, message: data.message };
+      }
+    } catch (backErr) {}
+    return { success: false };
+  }
+}
+
+export async function apiAddMessageReaction(messageId, userId, reaction) {
+  try {
+    const reactionRef = doc(db, 'reactions', `${messageId}_${userId}_${reaction}`);
+    const snap = await getDoc(reactionRef);
+
+    if (snap.exists()) {
+      await deleteDoc(reactionRef);
+    } else {
+      await setDoc(reactionRef, {
+        message_id: messageId,
+        user_id: userId,
+        reaction,
+        createdAt: serverTimestamp()
+      });
+    }
+
+    return { success: true };
+  } catch (e) {
+    console.error("apiAddMessageReaction error:", e);
+    return { success: false };
+  }
+}
+
+export async function apiEditMessage(messageId, userId, newContent) {
+  try {
+    const q = query(collection(db, 'conversations'));
+    const snap = await getDocs(q);
+
+    for (const convDoc of snap.docs) {
+      const msgRef = doc(db, 'conversations', convDoc.id, 'messages', messageId);
+      const msgSnap = await getDoc(msgRef);
+      if (msgSnap.exists()) {
+        await updateDoc(msgRef, {
+          content: newContent,
+          edited_at: new Date().toISOString()
+        });
+        return { success: true };
+      }
+    }
+
+    return { success: true };
+  } catch (e) {
+    console.error("apiEditMessage error:", e);
+    return { success: false };
+  }
+}
+
+export async function apiDeleteMessage(messageId, userId) {
+  try {
+    const q = query(collection(db, 'conversations'));
+    const snap = await getDocs(q);
+
+    for (const convDoc of snap.docs) {
+      const msgRef = doc(db, 'conversations', convDoc.id, 'messages', messageId);
+      const msgSnap = await getDoc(msgRef);
+      if (msgSnap.exists()) {
+        await updateDoc(msgRef, {
+          content: 'This message was deleted',
+          deleted_at: new Date().toISOString(),
+          deleted_by: userId
+        });
+        return { success: true };
+      }
+    }
+
+    return { success: true };
+  } catch (e) {
+    console.error("apiDeleteMessage error:", e);
+    return { success: false };
+  }
+}
+
+export async function apiMarkMessagesAsRead(conversationId, userId) {
+  if (!conversationId || !userId) return { success: false };
+  try {
+    const convRef = doc(db, 'conversations', conversationId);
+    await updateDoc(convRef, {
+      [`unreadCounts.${userId}`]: 0
+    }).catch(() => {});
+
+    const memberRef = doc(db, 'conversations', conversationId, 'members', userId);
+    await setDoc(memberRef, { last_read_at: new Date().toISOString() }, { merge: true }).catch(() => {});
+    return { success: true };
+  } catch (e) {
+    return { success: false };
+  }
+}
+
+export async function apiFetchAthletes(currentUserId) {
+  try {
+    const list = [];
+    
+    // 1. Fetch from Firestore profiles
+    try {
+      const snap = await getDocs(collection(db, 'profiles'));
+      snap.docs.forEach(d => list.push({ id: d.id, ...d.data() }));
+    } catch (e) {}
+
+    // 2. Fetch from Express backend
+    try {
+      const res = await fetch('http://localhost:5000/api/users');
+      if (res.ok) {
+        const users = await res.json();
+        users.forEach(u => {
+          if (!list.some(item => item.id === u.id || item.email === u.email)) {
+            list.push(u);
+          }
+        });
+      }
+    } catch {}
+
+    // Default athletes for instant discovery & direct messaging
+    const fallbackAthletes = [
+      { id: 'usr_rahul', name: 'Rahul Sharma', full_name: 'Rahul Sharma', sport: 'Football & Cricket', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Rahul', role: 'player', location: 'Indiranagar' },
+      { id: 'usr_priya', name: 'Priya Sharma', full_name: 'Priya Sharma', sport: 'Badminton & Pickleball', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Priya', role: 'owner', location: 'Porur, Chennai' },
+      { id: 'usr_vikram', name: 'Vikram Rao', full_name: 'Vikram Rao', sport: 'Football', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Vikram', role: 'player', location: 'Anna Nagar, Chennai' },
+      { id: 'usr_sneha', name: 'Sneha Reddy', full_name: 'Sneha Reddy', sport: 'Tennis & Badminton', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sneha', role: 'player', location: 'T. Nagar, Chennai' },
+      { id: 'usr_karthik', name: 'Karthik Subramanian', full_name: 'Karthik Subramanian', sport: 'Box Cricket', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Karthik', role: 'player', location: 'Velachery, Chennai' }
+    ];
+
+    fallbackAthletes.forEach(fa => {
+      if (!list.some(item => item.id === fa.id || item.name === fa.name)) {
+        list.push(fa);
+      }
+    });
+
+    return list.filter(u => u.id !== currentUserId && u.firebase_uid !== currentUserId);
+  } catch (e) {
+    console.warn('apiFetchAthletes notice:', e);
+    return [];
+  }
+}
+
+export async function apiBlockUser(blockerId, blockedId, action = 'block') {
+  try {
+    const blockId = `${blockerId}_${blockedId}`;
+    if (action === 'block') {
+      await setDoc(doc(db, 'blocks', blockId), { blocker_id: blockerId, blocked_id: blockedId, createdAt: serverTimestamp() });
+    } else {
+      await deleteDoc(doc(db, 'blocks', blockId));
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false };
+  }
+}
+
+export async function apiSubmitReport({ reporterId, reportedUserId, messageId, conversationId, reason, description }) {
+  try {
+    await addDoc(collection(db, 'reports'), {
+      reporter_id: reporterId,
+      reported_user_id: reportedUserId,
+      message_id: messageId || null,
+      conversation_id: conversationId || null,
+      reason: reason || 'Inappropriate behavior',
+      description: description || '',
+      createdAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false };
+  }
+}
+
+export async function apiUploadChatAttachment(file, conversationId) {
+  try {
+    const fileExt = file.name ? file.name.split('.').pop() : 'jpg';
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
+    const storageRef = ref(storage, `chat-attachments/${conversationId}/${fileName}`);
+    
+    const snapshot = await uploadBytes(storageRef, file);
+    const downloadUrl = await getDownloadURL(snapshot.ref);
+
+    return {
+      success: true,
+      storage_path: snapshot.ref.fullPath,
+      url: downloadUrl,
+      file_name: file.name || 'Attachment',
+      file_type: file.type || 'image/jpeg',
+      file_size: file.size || 0
+    };
+  } catch (e) {
+    console.warn("Attachment upload to Firebase Storage failed, using FileReader fallback:", e);
+  }
+
+  // Fallback to FileReader data URL
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve({
+        success: true,
+        storage_path: 'local_data_url',
+        url: reader.result,
+        file_name: file.name || 'Attachment',
+        file_type: file.type || 'image/jpeg',
+        file_size: file.size || 0
+      });
+    };
+    reader.onerror = () => resolve({ success: false });
+    reader.readAsDataURL(file);
+  });
+}
+
+// ─── Real-Time Subscriptions & Ephemeral Channels ───────────
+
+export function subscribeToConversationRealtime(conversationId, { onMessage, onReaction, onTyping, onPresence }) {
+  const unsubscribes = [];
+
+  try {
+    // 1. Messages Real-Time Listener
+    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+
+    const msgUnsub = onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (onMessage) {
+          onMessage({
+            eventType: change.type.toUpperCase(),
+            new: { id: change.doc.id, ...change.doc.data() }
+          });
+        }
+      });
+    }, (err) => console.warn('Firestore messages subscription notice:', err));
+
+    unsubscribes.push(msgUnsub);
+
+    // 2. Typing Indicator Listener
+    const typingRef = collection(db, 'conversations', conversationId, 'typing');
+    const typingUnsub = onSnapshot(typingRef, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (onTyping) onTyping(change.doc.data());
+      });
+    }, () => {});
+
+    unsubscribes.push(typingUnsub);
+
+    // 3. Presence Listener
+    const presenceRef = collection(db, 'conversations', conversationId, 'presence');
+    const presenceUnsub = onSnapshot(presenceRef, (snapshot) => {
+      if (onPresence) {
+        const state = {};
+        snapshot.docs.forEach(doc => {
+          state[doc.id] = [doc.data()];
+        });
+        onPresence(state);
+      }
+    }, () => {});
+
+    unsubscribes.push(presenceUnsub);
+  } catch (err) {
+    console.warn("subscribeToConversationRealtime setup error:", err);
+  }
+
+  const sendTypingStatus = (userObj, isTyping) => {
+    try {
+      const userKey = userObj.id || 'usr_me';
+      setDoc(doc(db, 'conversations', conversationId, 'typing', userKey), {
+        user: userObj,
+        isTyping,
+        timestamp: Date.now()
+      }, { merge: true }).catch(() => {});
+    } catch {}
+  };
+
+  const trackPresence = (userObj) => {
+    try {
+      const userKey = userObj.id || 'usr_me';
+      setDoc(doc(db, 'conversations', conversationId, 'presence', userKey), {
+        user_id: userObj.id || 'usr_me',
+        username: userObj.name || userObj.full_name || 'Athlete',
+        online_at: new Date().toISOString()
+      }, { merge: true }).catch(() => {});
+    } catch {}
+  };
+
+  return {
+    unsubscribe: () => {
+      unsubscribes.forEach(unsub => typeof unsub === 'function' && unsub());
+    },
+    sendTypingStatus,
+    trackPresence
+  };
+}
+
+export function subscribeToMessages(conversationId, callback) {
+  try {
+    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+
+    return onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          callback({ id: change.doc.id, ...change.doc.data() });
+        }
+      });
+    }, (err) => console.warn('subscribeToMessages error:', err));
+  } catch (e) {
+    return () => {};
+  }
+}
+
+
+// -- 4. Venues & Turfs ---------------------------------------
+
+export function resolveVenueImageUrl(pathOrUrl, bucket = 'venue-images') {
+  if (!pathOrUrl) return null;
+  if (typeof pathOrUrl !== 'string') return null;
+  if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://') || pathOrUrl.startsWith('data:')) {
+    return pathOrUrl;
+  }
+  return pathOrUrl;
+}
+
+const DEFAULT_TURFS = [
+  {
+    id: 'turf_together',
+    name: 'Turf Together',
+    category: 'Cricket',
+    address: '22/1, Erikarai Road, near SKR Engineering College, Meppur, Poonamallee, Chennai, Tamil Nadu 600123',
+    latitude: 13.0389,
+    longitude: 80.0937,
+    lat: 13.0389,
+    lng: 80.0937,
+    price: '₹1,200/hr',
+    price_per_hr: 1200,
+    rating: 4.8,
+    reviewsCount: 112,
+    sports: ['Cricket', 'Football'],
+    image_url: 'https://images.unsplash.com/photo-1575361204480-aadea25e6e68?q=80&w=800',
+    image: 'https://images.unsplash.com/photo-1575361204480-aadea25e6e68?q=80&w=800',
+    description: 'Premier box cricket and football turf facility in Poonamallee.',
+    is_open_24_hours: true
+  },
+  {
+    id: 'turf_tlk_sports_academy',
+    name: 'TLK Sports Academy',
+    category: 'Badminton',
+    address: 'Pidarithangal, Poonamallee, Chennai, Tamil Nadu 600056',
+    latitude: 13.0448,
+    longitude: 80.0737,
+    lat: 13.0448,
+    lng: 80.0737,
+    price: '₹200/hr',
+    price_per_hr: 200,
+    rating: 4.7,
+    reviewsCount: 94,
+    sports: ['Badminton'],
+    image_url: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=800',
+    image: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=800',
+    description: 'Professional indoor badminton courts with BWF standard matting.',
+    is_open_24_hours: true
+  },
+  {
+    id: 'turf_thiram_sports_academy',
+    name: 'Thiram Sports Academy – Poonamallee',
+    category: 'Pickleball',
+    address: 'Trunk Road, Poonamallee, Chennai, Tamil Nadu 600056',
+    latitude: 13.0466,
+    longitude: 80.0715,
+    lat: 13.0466,
+    lng: 80.0715,
+    price: '₹350/hr',
+    price_per_hr: 350,
+    rating: 4.6,
+    reviewsCount: 88,
+    sports: ['Pickleball', 'Cricket'],
+    image_url: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?q=80&w=800',
+    image: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?q=80&w=800',
+    description: 'Dedicated pickleball arena and multi-sport practice grounds.',
+    is_open_24_hours: true
+  },
+  {
+    id: 'turf_whistle_podu_arena',
+    name: 'Whistle Podu Arena',
+    category: 'Cricket',
+    address: 'Etti Annal Nagar, Sankar Nagar Main Road, Poonamallee, Chennai, Tamil Nadu 600056',
+    latitude: 13.0477,
+    longitude: 80.0850,
+    lat: 13.0477,
+    lng: 80.0850,
+    price: '₹1,100/hr',
+    price_per_hr: 1100,
+    rating: 4.9,
+    reviewsCount: 145,
+    sports: ['Cricket', 'Football'],
+    image_url: 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?q=80&w=800',
+    image: 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?q=80&w=800',
+    description: 'Popular oval-shaped box cricket turf and football pitch.',
+    is_open_24_hours: true
+  },
+  {
+    id: 'turf_pav_sports_club',
+    name: 'PAV Sports Club',
+    category: 'Football',
+    address: 'Kumananchavadi, Poonamallee, Chennai, Tamil Nadu 600056',
+    latitude: 13.0557124,
+    longitude: 80.0926404,
+    lat: 13.0557124,
+    lng: 80.0926404,
+    price: '₹1,000/hr',
+    price_per_hr: 1000,
+    rating: 4.5,
+    reviewsCount: 76,
+    sports: ['Cricket', 'Football'],
+    image_url: 'https://images.unsplash.com/photo-1504450758481-7338eba7524a?q=80&w=800',
+    image: 'https://images.unsplash.com/photo-1504450758481-7338eba7524a?q=80&w=800',
+    description: 'High-quality multi-sport synthetic turf facility.',
+    is_open_24_hours: true
+  }
+];
+
+export async function apiFetchVenues(filters = {}) {
+  let customVenues = [];
+  try {
+    const s = localStorage.getItem('turfington_custom_venues');
+    if (s) customVenues = JSON.parse(s);
+  } catch {}
+
+  let apiVenues = [];
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch('http://localhost:5000/api/venues', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.venues && Array.isArray(data.venues)) {
+        apiVenues = data.venues;
+      }
+    }
+  } catch {}
+
+  let dbVenues = [];
+  try {
+    let q = collection(db, 'venues');
+    if (filters.ownerId) {
+      q = query(q, where('owner_id', '==', filters.ownerId));
+    }
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      dbVenues = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch (err) {
+    console.warn('apiFetchVenues Firestore notice:', err);
+  }
+
+  let dbTurfs = [];
+  try {
+    const snapTurfs = await getDocs(collection(db, 'turfs'));
+    if (!snapTurfs.empty) {
+      dbTurfs = snapTurfs.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch {}
+
+  const map = new Map();
+  // Custom venues take highest priority
+  [...customVenues, ...apiVenues, ...dbVenues, ...dbTurfs, ...DEFAULT_TURFS].forEach(v => {
+    if (!v || (!v.id && !v.name)) return;
+    const key = String(v.id || v.name);
+    if (map.has(key)) return;
+
+    const resolvedImage = resolveVenueImageUrl(v.storage_path || v.image_url || v.image);
+    const lat = parseFloat(v.latitude ?? v.lat) || 13.0827;
+    const lng = parseFloat(v.longitude ?? v.lng) || 80.2707;
+    const sportsList = Array.isArray(v.sports) && v.sports.length > 0 
+      ? v.sports 
+      : [v.sport || v.category || 'Sports'];
+
+    map.set(key, {
+      ...v,
+      id: v.id || key,
+      name: v.name || 'Sports Arena',
+      venue: v.name || 'Sports Arena',
+      sport: v.sport || sportsList[0] || 'Sports',
+      category: v.category || v.sport || sportsList[0] || 'Sports',
+      sports: sportsList,
+      lat,
+      lng,
+      latitude: lat,
+      longitude: lng,
+      price: v.price || (v.price_per_hr ? `₹${v.price_per_hr}/hr` : '₹1,000/hr'),
+      price_per_hr: Number(v.price_per_hr) || 1000,
+      image_url: resolvedImage,
+      image: resolvedImage,
+      rating: v.rating || 5.0,
+      owner_id: v.owner_id || 'usr_priya'
+    });
+  });
+
+  let allVenues = Array.from(map.values());
+  if (filters.ownerId) {
+    allVenues = allVenues.filter(v => v.owner_id === filters.ownerId);
+  }
+  return allVenues;
+}
+
+export async function apiFetchTurfs() {
+  let customVenues = [];
+  try {
+    const s = localStorage.getItem('turfington_custom_venues');
+    if (s) customVenues = JSON.parse(s);
+  } catch {}
+
+  let apiVenues = [];
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch('http://localhost:5000/api/venues', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.venues && Array.isArray(data.venues)) {
+        apiVenues = data.venues;
+      }
+    }
+  } catch {}
+
+  let dbVenues = [];
+  try {
+    const snapVenues = await getDocs(collection(db, 'venues'));
+    if (!snapVenues.empty) {
+      dbVenues = snapVenues.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch {}
+
+  let dbTurfs = [];
+  try {
+    const snapTurfs = await getDocs(collection(db, 'turfs'));
+    if (!snapTurfs.empty) {
+      dbTurfs = snapTurfs.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch {}
+
+  const map = new Map();
+  // Order: custom venues first, then API venues, then Firestore, then DEFAULT_TURFS
+  [...customVenues, ...apiVenues, ...dbVenues, ...dbTurfs, ...DEFAULT_TURFS].forEach(t => {
+    if (!t || (!t.id && !t.name)) return;
+    const key = String(t.id || t.name);
+    if (map.has(key)) return;
+
+    const resolvedImage = resolveVenueImageUrl(t.storage_path || t.image_url || t.image);
+    const lat = parseFloat(t.latitude ?? t.lat) || 13.0827;
+    const lng = parseFloat(t.longitude ?? t.lng) || 80.2707;
+    const sportsList = Array.isArray(t.sports) && t.sports.length > 0 
+      ? t.sports 
+      : [t.sport || t.category || 'Sports'];
+
+    map.set(key, {
+      ...t,
+      id: t.id || key,
+      name: t.name || 'Sports Arena',
+      venue: t.name || 'Sports Arena',
+      sport: t.sport || sportsList[0] || 'Sports',
+      category: t.category || t.sport || sportsList[0] || 'Sports',
+      sports: sportsList,
+      lat,
+      lng,
+      latitude: lat,
+      longitude: lng,
+      price: t.price || (t.price_per_hr ? `₹${t.price_per_hr}/hr` : '₹1,000/hr'),
+      price_per_hr: Number(t.price_per_hr) || 1000,
+      image_url: resolvedImage,
+      image: resolvedImage,
+      rating: t.rating || 5.0,
+      is_open_24_hours: t.is_open_24_hours ?? true
+    });
+  });
+
+  return Array.from(map.values());
+}
+
+export function apiSubscribeVenues(callback) {
+  if (typeof callback !== 'function') return () => {};
+
+  // 1. Immediately emit current cached/loaded venues
+  apiFetchTurfs().then(turfs => callback(turfs));
+
+  // 2. Window event listener for intra-app updates
+  const handleUpdate = () => {
+    apiFetchTurfs().then(turfs => callback(turfs));
+  };
+  window.addEventListener('turfington_venues_updated', handleUpdate);
+
+  // 3. Storage event listener for cross-tab localStorage updates
+  const handleStorage = (e) => {
+    if (e.key === 'turfington_custom_venues' || e.key === 'turfington_venues_timestamp') {
+      apiFetchTurfs().then(turfs => callback(turfs));
+    }
+  };
+  window.addEventListener('storage', handleStorage);
+
+  // 4. Cross-tab BroadcastChannel
+  let channel = null;
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      channel = new BroadcastChannel('turfington_venues_channel');
+      channel.onmessage = (msg) => {
+        if (msg.data?.type === 'VENUES_UPDATED') {
+          apiFetchTurfs().then(turfs => callback(turfs));
+        }
+      };
+    }
+  } catch {}
+
+  // 5. Firestore real-time onSnapshot listeners
+  let unsubVenues = null;
+  let unsubTurfs = null;
+  try {
+    unsubVenues = onSnapshot(collection(db, 'venues'), () => {
+      apiFetchTurfs().then(turfs => callback(turfs));
+    }, () => {});
+  } catch {}
+
+  try {
+    unsubTurfs = onSnapshot(collection(db, 'turfs'), () => {
+      apiFetchTurfs().then(turfs => callback(turfs));
+    }, () => {});
+  } catch {}
+
+  // 6. Return comprehensive cleanup function
+  return () => {
+    window.removeEventListener('turfington_venues_updated', handleUpdate);
+    window.removeEventListener('storage', handleStorage);
+    if (channel) {
+      channel.close();
+    }
+    if (unsubVenues) unsubVenues();
+    if (unsubTurfs) unsubTurfs();
+  };
+}
+
+export async function apiFetchNearbyTurfs(playerLat, playerLng, radiusKm = 5) {
+  const allTurfs = await apiFetchTurfs();
+  if (!playerLat || !playerLng) return allTurfs;
+
+  const R = 6371;
+  const filtered = allTurfs
+    .map(t => {
+      const lat1 = playerLat;
+      const lon1 = playerLng;
+      const lat2 = t.latitude || t.lat;
+      const lon2 = t.longitude || t.lng;
+      if (lat2 == null || lon2 == null) return null;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) ** 2;
+      const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return {
+        ...t,
+        distance_km: parseFloat(dist.toFixed(1))
+      };
+    })
+    .filter(Boolean)
+    .filter(t => radiusKm === 'All' || t.distance_km <= radiusKm)
+    .sort((a, b) => a.distance_km - b.distance_km);
+
+  return filtered;
+}
+
+export async function apiCreateTurf(turfData) {
+  try {
+    const docRef = await addDoc(collection(db, 'turfs'), {
+      ...turfData,
+      createdAt: serverTimestamp()
+    });
+    return { success: true, turf: { id: docRef.id, ...turfData } };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function apiCreateVenue(venueData) {
+  const venueLat = parseFloat(venueData.lat ?? venueData.latitude) || 13.0827;
+  const venueLng = parseFloat(venueData.lng ?? venueData.longitude) || 80.2707;
+  const sportsArr = Array.isArray(venueData.sports) && venueData.sports.length > 0 
+    ? venueData.sports 
+    : [venueData.sport || 'Sports'];
+  const resolvedImg = venueData.image || venueData.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=800';
+
+  const customVenue = {
+    id: 'venue_' + Date.now(),
+    name: venueData.name,
+    venue: venueData.name,
+    category: venueData.sport || sportsArr[0] || 'Sports',
+    sport: venueData.sport || sportsArr[0] || 'Sports',
+    sports: sportsArr,
+    address: venueData.address || venueData.location || 'Chennai, Tamil Nadu',
+    location: venueData.address || venueData.location || 'Chennai, Tamil Nadu',
+    city: venueData.city || 'Chennai',
+    latitude: venueLat,
+    longitude: venueLng,
+    lat: venueLat,
+    lng: venueLng,
+    price: venueData.price_per_hr ? `₹${venueData.price_per_hr}/hr` : '₹1,000/hr',
+    price_per_hr: Number(venueData.price_per_hr) || 1000,
+    rating: 5.0,
+    reviewsCount: 1,
+    image_url: resolvedImg,
+    image: resolvedImg,
+    description: venueData.description || 'Newly added sports venue on Turfington.',
+    is_open_24_hours: true,
+    owner_id: venueData.owner_id || 'usr_priya',
+    created_at: new Date().toISOString()
+  };
+
+  // 1. Local Storage save for zero-latency local availability
+  try {
+    const existingStr = localStorage.getItem('turfington_custom_venues');
+    const existing = existingStr ? JSON.parse(existingStr) : [];
+    const updated = [customVenue, ...existing.filter(v => v.name !== customVenue.name && v.id !== customVenue.id)];
+    localStorage.setItem('turfington_custom_venues', JSON.stringify(updated));
+    localStorage.setItem('turfington_venues_timestamp', Date.now().toString());
+  } catch {}
+
+  // 2. Dispatch real-time window events (intra-tab)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('turfington_venues_updated', { detail: customVenue }));
+  }
+
+  // 3. BroadcastChannel across all browser tabs
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel('turfington_venues_channel');
+      bc.postMessage({ type: 'VENUES_UPDATED', venue: customVenue });
+      bc.close();
+    }
+  } catch {}
+
+  // 4. Send POST to Express API server in background
+  try {
+    fetch('http://localhost:5000/api/venues', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(customVenue)
+    }).catch(() => {});
+  } catch {}
+
+  // 5. Firestore sync to both venues and turfs collections
+  try {
+    addDoc(collection(db, 'venues'), customVenue).catch(() => {});
+    addDoc(collection(db, 'turfs'), customVenue).catch(() => {});
+  } catch {}
+
+  return { success: true, venue: customVenue };
+}
+
+export async function apiDeleteVenue(venueId) {
+  try {
+    const existingStr = localStorage.getItem('turfington_custom_venues');
+    if (existingStr) {
+      const existing = JSON.parse(existingStr);
+      const updated = existing.filter(v => String(v.id) !== String(venueId) && v.name !== venueId);
+      localStorage.setItem('turfington_custom_venues', JSON.stringify(updated));
+      localStorage.setItem('turfington_venues_timestamp', Date.now().toString());
+    }
+  } catch {}
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('turfington_venues_updated', { detail: { deletedId: venueId } }));
+  }
+
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel('turfington_venues_channel');
+      bc.postMessage({ type: 'VENUES_UPDATED', deletedId: venueId });
+      bc.close();
+    }
+  } catch {}
+
+  try {
+    fetch(`http://localhost:5000/api/venues/${venueId}`, { method: 'DELETE' }).catch(() => {});
+  } catch {}
+
+  deleteDoc(doc(db, 'venues', venueId)).catch(() => {});
+  deleteDoc(doc(db, 'turfs', venueId)).catch(() => {});
+
+  return { success: true };
+}
+
+
+// -- 5. Bookings ---------------------------------------------
+
+export async function apiFetchBookings(userId) {
+  let localBookings = [];
+  try {
+    const s = localStorage.getItem('turfington_user_bookings');
+    if (s) localBookings = JSON.parse(s);
+  } catch {}
+
+  let dbBookings = [];
+  try {
+    const q = query(collection(db, 'bookings'), where('user_id', '==', userId));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      dbBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch (err) {
+    console.warn('apiFetchBookings Firestore error:', err);
+  }
+
+  const map = new Map();
+  [...dbBookings, ...localBookings].forEach(b => map.set(b.id, b));
+  return Array.from(map.values());
+}
+
+export async function apiCreateBooking(bookingData) {
+  const newBooking = {
+    id: bookingData.id || 'bk_' + Date.now(),
+    created_at: new Date().toISOString(),
+    status: bookingData.status || 'PENDING OWNER APPROVAL',
+    rejection_reason: null,
+    ...bookingData
+  };
+
+  try {
+    const s = localStorage.getItem('turfington_user_bookings');
+    const existing = s ? JSON.parse(s) : [];
+    const updated = [newBooking, ...existing];
+    localStorage.setItem('turfington_user_bookings', JSON.stringify(updated));
+  } catch {}
+
+  addDoc(collection(db, 'bookings'), {
+    ...newBooking,
+    createdAt: serverTimestamp()
+  }).catch(() => {});
+
+  return { success: true, data: newBooking };
+}
+
+export async function apiUpdateBookingStatus(bookingId, status, rejectionReason = null) {
+  try {
+    // 1. Update in local storage
+    const s = localStorage.getItem('turfington_user_bookings');
+    if (s) {
+      const existing = JSON.parse(s);
+      const updated = existing.map(b => {
+        if (b.id === bookingId) {
+          return { ...b, status, rejection_reason: rejectionReason, updated_at: new Date().toISOString() };
+        }
+        return b;
+      });
+      localStorage.setItem('turfington_user_bookings', JSON.stringify(updated));
+    }
+  } catch {}
+
+  // 2. Update Firestore
+  try {
+    const q = query(collection(db, 'bookings'), where('id', '==', bookingId));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const docRef = doc(db, 'bookings', snap.docs[0].id);
+      await updateDoc(docRef, {
+        status,
+        rejection_reason: rejectionReason,
+        updatedAt: serverTimestamp()
+      });
+    }
+  } catch (err) {
+    console.warn('apiUpdateBookingStatus Firestore error:', err);
+  }
+
+  return { success: true };
+}
+
+export async function apiFetchOwnerBookings(ownerId) {
+  let localBookings = [];
+  try {
+    const s = localStorage.getItem('turfington_user_bookings');
+    if (s) localBookings = JSON.parse(s);
+  } catch {}
+
+  let dbBookings = [];
+  try {
+    const q = query(collection(db, 'bookings'), where('owner_id', '==', ownerId));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      dbBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch (err) {}
+
+  const map = new Map();
+  [...dbBookings, ...localBookings].forEach(b => {
+    if (b.owner_id === ownerId || b.ownerId === ownerId || !ownerId) {
+      map.set(b.id, b);
+    }
+  });
+
+  return Array.from(map.values());
+}
+
+// -- 6. Community & Marketplace --------------------------------
+
+export async function apiFetchClubs() {
+  try {
+    const snap = await getDocs(collection(db, 'clubs'));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function apiCreateClub(clubData) {
+  try {
+    const docRef = await addDoc(collection(db, 'clubs'), {
+      ...clubData,
+      createdAt: serverTimestamp()
+    });
+    return { success: true, club: { id: docRef.id, ...clubData } };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+export async function apiFetchStories() {
+  try {
+    const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function apiCreateStory(storyData) {
+  try {
+    const docRef = await addDoc(collection(db, 'stories'), {
+      ...storyData,
+      createdAt: serverTimestamp()
+    });
+    return { success: true, story: { id: docRef.id, ...storyData } };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+const DEFAULT_FEED_POSTS = [
+  {
+    id: 'post_501',
+    author: 'Rahul Sharma',
+    avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Rahul',
+    time: '2 hours ago',
+    content: 'Just booked the main court at Vanguard Arena for 7 PM tomorrow. We need 3 more players for a 5v5 friendly. Skill level: Intermediate. Let me know if you want in!',
+    image: '/turf_story_highlight.png',
+    likes: 18,
+    comments: 6,
+    liked_by: [],
+    createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString()
+  },
+  {
+    id: 'post_502',
+    author: 'Vanguard Sports Arena',
+    avatar: 'https://api.dicebear.com/7.x/identicon/svg?seed=Vanguard',
+    time: '4 hours ago',
+    content: '🔥 WET SLOTS AVAILABLE TONIGHT: Astroturf Court 2 has open slots between 9 PM and 11 PM. Flat 15% discount for bookings made in the next hour! Contact us now to reserve.',
+    image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=600',
+    likes: 45,
+    comments: 11,
+    liked_by: ['usr_rahul'],
+    createdAt: new Date(Date.now() - 4 * 3600 * 1000).toISOString()
+  }
+];
+
+export async function apiFetchPosts() {
+  let localPosts = [];
+  try {
+    const s = localStorage.getItem('turfington_feed_posts');
+    localPosts = s ? JSON.parse(s) : DEFAULT_FEED_POSTS;
+  } catch {
+    localPosts = DEFAULT_FEED_POSTS;
+  }
+
+  // 1. Fetch from Express backend server (cross-account shared DB on localhost)
+  let serverPosts = [];
+  try {
+    const res = await fetch('http://localhost:5000/api/posts');
+    if (res.ok) {
+      const data = await res.json();
+      serverPosts = Array.isArray(data) ? data : (Array.isArray(data?.posts) ? data.posts : []);
+    }
+  } catch (e) {}
+
+  // 2. Fetch from Firestore if available
+  let firestorePosts = [];
+  try {
+    const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      firestorePosts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+  } catch (err) {}
+
+  // 3. Deduplicate and merge by post ID
+  const map = new Map();
+  if (Array.isArray(DEFAULT_FEED_POSTS)) DEFAULT_FEED_POSTS.forEach(p => map.set(String(p.id), p));
+  if (Array.isArray(localPosts)) localPosts.forEach(p => map.set(String(p.id), { ...map.get(String(p.id)), ...p }));
+  if (Array.isArray(serverPosts)) serverPosts.forEach(p => map.set(String(p.id), { ...map.get(String(p.id)), ...p }));
+  if (Array.isArray(firestorePosts)) firestorePosts.forEach(p => map.set(String(p.id), { ...map.get(String(p.id)), ...p }));
+
+  const merged = Array.from(map.values()).sort((a, b) => {
+    const timeA = new Date(a.createdAt || a.created_at || 0).getTime();
+    const timeB = new Date(b.createdAt || b.created_at || 0).getTime();
+    return timeB - timeA;
+  });
+
+  try {
+    localStorage.setItem('turfington_feed_posts', JSON.stringify(merged));
+  } catch {}
+
+  return merged;
+}
+
+export async function apiCreatePost(postData) {
+  const postId = postData.id || `post_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+  const now = new Date().toISOString();
+  const formattedPost = {
+    ...postData,
+    id: postId,
+    likes: postData.likes || 0,
+    comments: postData.comments || 0,
+    liked_by: postData.liked_by || [],
+    time: postData.time || 'Just now',
+    createdAt: now,
+    created_at: now,
+    user_id: postData.author_id || postData.user_id || 'usr_anonymous',
+    created_by: postData.author_id || postData.user_id || 'usr_anonymous'
+  };
+
+  // 1. Immediately persist to shared localStorage (accessible across all accounts in this browser)
+  try {
+    const existingStr = localStorage.getItem('turfington_feed_posts');
+    const existing = existingStr ? JSON.parse(existingStr) : DEFAULT_FEED_POSTS;
+    const updated = [formattedPost, ...existing.filter(p => String(p.id) !== String(postId))];
+    localStorage.setItem('turfington_feed_posts', JSON.stringify(updated));
+  } catch (e) {}
+
+  // 2. Persist to Express backend server
+  try {
+    fetch('http://localhost:5000/api/posts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formattedPost)
+    }).catch(() => {});
+  } catch (e) {}
+
+  // 3. Persist to Firestore
+  try {
+    addDoc(collection(db, 'posts'), {
+      ...formattedPost,
+      createdAt: serverTimestamp()
+    }).catch(() => {});
+  } catch (e) {}
+
+  return { success: true, post: formattedPost };
+}
+
+export async function apiLikePost(postId, userId) {
+  // 1. Update shared localStorage
+  try {
+    const existingStr = localStorage.getItem('turfington_feed_posts');
+    const existing = existingStr ? JSON.parse(existingStr) : DEFAULT_FEED_POSTS;
+    const updated = existing.map(p => {
+      if (String(p.id) === String(postId)) {
+        const likedBy = p.liked_by || [];
+        const isLiked = likedBy.includes(userId);
+        const newLikedBy = isLiked ? likedBy.filter(u => u !== userId) : [...likedBy, userId];
+        const newLikes = isLiked ? Math.max(0, (p.likes || 1) - 1) : (p.likes || 0) + 1;
+        return { ...p, liked_by: newLikedBy, likes: newLikes };
+      }
+      return p;
+    });
+    localStorage.setItem('turfington_feed_posts', JSON.stringify(updated));
+  } catch (e) {}
+
+  // 2. Update Express server
+  try {
+    fetch(`http://localhost:5000/api/posts/${postId}/like`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId })
+    }).catch(() => {});
+  } catch (e) {}
+
+  return { success: true };
+}
+
+const INITIAL_MARKETPLACE_ITEMS = [
+  {
+    id: 'mp_1',
+    name: 'Stealth Pro Aero Shoes',
+    category: 'Shoes',
+    image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=400',
+    price: 3499,
+    tag: 'Pre-owned (Like New)',
+    condition: 'Pre-owned (Like New)',
+    description: 'Pre-owned athletic shoes with professional carbon plate inserts. Excellent grip for synthetic turf.',
+    sellerName: 'Deepak Kumar',
+    sellerAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'mp_2',
+    name: 'English Willow Bat (Grade 1)',
+    category: 'Equipment',
+    image: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?q=80&w=400',
+    price: 4999,
+    tag: 'New (Sealed Pack)',
+    condition: 'New (Sealed Pack)',
+    description: 'Professional grade 1 English Willow cricket bat with chevron grip and protective toe guard.',
+    sellerName: 'Amit Patel',
+    sellerAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'mp_3',
+    name: 'Yonex Arcsaber 11 Pro Racket',
+    category: 'Rackets',
+    image: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=400',
+    price: 2800,
+    tag: 'Pre-owned (Good)',
+    condition: 'Pre-owned (Good)',
+    description: 'Even balance badminton racket strung with BG80 Power at 26 lbs. Minor scuffs on frame.',
+    sellerName: 'Pooja Reddy',
+    sellerAvatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'mp_4',
+    name: 'Official FIFA Match Football',
+    category: 'Equipment',
+    image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=400',
+    price: 1200,
+    tag: 'New (Sealed Pack)',
+    condition: 'New (Sealed Pack)',
+    description: 'Thermally bonded seamless surface match ball. Includes pump and ball net.',
+    sellerName: 'Rahul Sharma',
+    sellerAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Rahul',
+    created_at: new Date().toISOString()
+  }
+];
+
+export async function apiFetchMarketplaceItems() {
+  let localItems = [];
+  try {
+    const s = localStorage.getItem('turfington_marketplace_items');
+    localItems = s ? JSON.parse(s) : INITIAL_MARKETPLACE_ITEMS;
+  } catch {
+    localItems = INITIAL_MARKETPLACE_ITEMS;
+  }
+
+  try {
+    const snap = await getDocs(collection(db, 'marketplace_items'));
+    if (!snap.empty) {
+      const dbItems = snap.docs.map(item => ({ id: item.id, ...item.data() }));
+      const map = new Map();
+      [...dbItems, ...localItems].forEach(item => map.set(item.id, item));
+      const merged = Array.from(map.values());
+      localStorage.setItem('turfington_marketplace_items', JSON.stringify(merged));
+      return merged;
+    }
+  } catch (err) {}
+
+  return localItems;
+}
+
+export async function apiCreateMarketplaceItem(itemData) {
+  const newItem = {
+    id: 'mp_' + Date.now(),
+    name: itemData.name,
+    category: itemData.category,
+    price: itemData.price,
+    condition: itemData.condition || 'New (Sealed Pack)',
+    tag: itemData.condition || 'New (Sealed Pack)',
+    description: itemData.description,
+    image: itemData.image_url || itemData.image || 'https://images.unsplash.com/photo-1511067007398-7e4b90cfa4bc?q=80&w=400',
+    seller_id: itemData.seller_id || 'usr_me',
+    sellerName: itemData.sellerName || 'You',
+    sellerAvatar: itemData.sellerAvatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=You',
+    created_at: new Date().toISOString()
+  };
+
+  try {
+    const existingStr = localStorage.getItem('turfington_marketplace_items');
+    const existing = existingStr ? JSON.parse(existingStr) : INITIAL_MARKETPLACE_ITEMS;
+    const updated = [newItem, ...existing];
+    localStorage.setItem('turfington_marketplace_items', JSON.stringify(updated));
+  } catch {}
+
+  addDoc(collection(db, 'marketplace_items'), {
+    ...itemData,
+    createdAt: serverTimestamp()
+  }).catch(() => {});
+
+  return { success: true, item: newItem };
+}
+
+export async function apiUpdateMarketplaceItem(itemId, updatedData) {
+  try {
+    const existingStr = localStorage.getItem('turfington_marketplace_items');
+    const existing = existingStr ? JSON.parse(existingStr) : INITIAL_MARKETPLACE_ITEMS;
+    const updated = existing.map(item => item.id === itemId ? { ...item, ...updatedData } : item);
+    localStorage.setItem('turfington_marketplace_items', JSON.stringify(updated));
+  } catch {}
+
+  deleteDoc(doc(db, 'marketplace_items', itemId)).catch(() => {});
+  setDoc(doc(db, 'marketplace_items', itemId), updatedData, { merge: true }).catch(() => {});
+
+  return { success: true };
+}
+
+export async function apiDeleteMarketplaceItem(itemId) {
+  try {
+    const existingStr = localStorage.getItem('turfington_marketplace_items');
+    const existing = existingStr ? JSON.parse(existingStr) : INITIAL_MARKETPLACE_ITEMS;
+    const updated = existing.filter(item => item.id !== itemId);
+    localStorage.setItem('turfington_marketplace_items', JSON.stringify(updated));
+  } catch {}
+
+  deleteDoc(doc(db, 'marketplace_items', itemId)).catch(() => {});
+
+  return { success: true };
+}
+
+
+export async function apiGetEmailByUsername(username) {
+  try {
+    const q = query(collection(db, 'profiles'), where('username', '==', username), limit(1));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return snap.docs[0].data().email;
+    }
+  } catch (err) {}
+  return null;
+}

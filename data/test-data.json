@@ -1,0 +1,56 @@
+{
+  "auth": {
+    "validUser": {
+      "email": "testplayer@turfington.com",
+      "password": "Password123!",
+      "username": "testplayer",
+      "fullName": "Test Player"
+    },
+    "invalidUser": {
+      "email": "nonexistent@turfington.com",
+      "password": "WrongPassword123!"
+    },
+    "emptyFields": {
+      "email": "",
+      "password": ""
+    },
+    "malformedEmail": {
+      "email": "invalidemailformat",
+      "password": "Password123!"
+    },
+    "weakPassword": {
+      "email": "weakpass@turfington.com",
+      "password": "123"
+    }
+  },
+  "search": {
+    "sports": ["Football", "Badminton", "Cricket", "Pickleball"],
+    "locations": ["Chennai", "Indiranagar", "Kilpauk", "Chetpet"],
+    "radii": [5, 10, 20, 30, 50]
+  },
+  "venue": {
+    "validVenue": {
+      "name": "E2E Test Astro Arena",
+      "location": "Kilpauk Garden Road, Chennai",
+      "latitude": "13.0824",
+      "longitude": "80.2428",
+      "price": "1200",
+      "phone": "+91 98765 43210",
+      "description": "Automated E2E test venue listing"
+    },
+    "invalidVenue": {
+      "name": "",
+      "location": "",
+      "price": "-100"
+    }
+  },
+  "marketplace": {
+    "validItem": {
+      "name": "E2E Automated Carbon Shoes",
+      "category": "Shoes",
+      "price": "2500",
+      "condition": "New (Sealed Pack)",
+      "description": "Automated Selenium E2E gear listing test item"
+    }
+  }
+}

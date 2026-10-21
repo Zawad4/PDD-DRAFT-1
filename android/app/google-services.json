@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "147940618215",
+    "project_id": "turfington-b759a",
+    "storage_bucket": "turfington-b759a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:147940618215:android:bde92d4736d051b37f9742",
+        "android_client_info": {
+          "package_name": "turfington.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "147940618215-1jpkrs440vtshu4hc7sf3rcm4ecs3toj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAYZs21pFQMZdBlAp3BChQ7fqbbzG_N8fM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "147940618215-1jpkrs440vtshu4hc7sf3rcm4ecs3toj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

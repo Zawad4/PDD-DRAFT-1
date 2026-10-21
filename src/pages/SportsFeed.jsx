@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Heart, 
@@ -16,83 +16,111 @@ import {
   Users,
   Star,
   Settings,
-  X
+  X,
+  Sparkles
 } from 'lucide-react';
+import { apiFetchPosts, apiCreatePost, apiLikePost } from '../services/db';
+
+const POST_TAGS = [
+  { id: 'achievement', label: '🏆 Achievement', color: 'bg-amber-500/10 text-amber-300 border-amber-500/25' },
+  { id: 'highlight',   label: '⚡ Highlight',   color: 'bg-indigo-500/10 text-indigo-300 border-indigo-500/25' },
+  { id: 'players',     label: '👥 Need Players', color: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25' },
+  { id: 'announce',    label: '📢 Announcement', color: 'bg-rose-500/10 text-rose-300 border-rose-500/25' },
+  { id: 'general',     label: '💬 Discussion',   color: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25' },
+];
 
 export default function SportsFeed({ user }) {
-  const [feedPosts, setFeedPosts] = useState([
-    {
-      id: 501,
-      author: 'Rahul Sharma',
-      avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Rahul',
-      time: '2 hours ago',
-      content: 'Just booked the main court at Vanguard Arena for 7 PM tomorrow. We need 3 more players for a 5v5 friendly. Skill level: Intermediate. Let me know if you want in!',
-      image: '/turf_story_highlight.png',
-      likes: 18,
-      comments: 6,
-      liked: false
-    },
-    {
-      id: 502,
-      author: 'Vanguard Sports Arena',
-      avatar: 'https://api.dicebear.com/7.x/identicon/svg?seed=Vanguard',
-      time: '4 hours ago',
-      content: '🔥 WET SLOTS AVAILABLE TONIGHT: Astroturf Court 2 has open slots between 9 PM and 11 PM. Flat 15% discount for bookings made in the next hour! Contact us now to reserve.',
-      image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=600',
-      likes: 45,
-      comments: 11,
-      liked: true
-    },
-    {
-      id: 503,
-      author: 'Sonia Verma',
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sonia',
-      time: '5 hours ago',
-      content: 'Personal best at the Bowling Championship League today! 240 score. Shoutout to the Turfington crew for organizing!',
-      image: '/bowling.jpg',
-      likes: 34,
-      comments: 12,
-      liked: false
-    }
-  ]);
-
+  const [feedPosts, setFeedPosts] = useState([]);
   const [postText, setPostText] = useState('');
   const [postImage, setPostImage] = useState('');
   const [showImageInput, setShowImageInput] = useState(false);
+  const [selectedTag, setSelectedTag] = useState('🏆 Achievement');
+  const [isPosting, setIsPosting] = useState(false);
 
-  const handleLikePost = (postId) => {
+  const loadDbPosts = useCallback(async () => {
+    const dbPosts = await apiFetchPosts();
+    if (dbPosts && dbPosts.length > 0) {
+      const formatted = dbPosts.map(p => ({
+        id: p.id,
+        author: p.author || p.user_name || p.userName || 'Athlete',
+        avatar: p.avatar || p.user_avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(p.author || 'User')}`,
+        time: p.time || p.timeAgo || 'Just now',
+        content: p.content,
+        image: p.image,
+        tag: p.tag || null,
+        likes: p.likes || 0,
+        comments: p.commentsCount || p.comments || 0,
+        liked: (p.liked_by || []).includes(user?.id) || false
+      }));
+      setFeedPosts(formatted);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    loadDbPosts();
+
+    // Auto-sync when another account or browser tab posts
+    const handleStorage = (e) => {
+      if (e.key === 'turfington_feed_posts') {
+        loadDbPosts();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // Periodic poll every 4 seconds to sync any new posts in real-time
+    const interval = setInterval(loadDbPosts, 4000);
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      clearInterval(interval);
+    };
+  }, [loadDbPosts]);
+
+  const handleLikePost = async (postId) => {
     setFeedPosts(prev => prev.map(post => {
-      if (post.id === postId) {
+      if (String(post.id) === String(postId)) {
         return {
           ...post,
           liked: !post.liked,
-          likes: post.liked ? post.likes - 1 : post.likes + 1
+          likes: post.liked ? Math.max(0, post.likes - 1) : post.likes + 1
         };
       }
       return post;
     }));
+    await apiLikePost(postId, user?.id || 'usr_anonymous');
   };
 
-  const handleCreatePost = (e) => {
+  const handleCreatePost = async (e) => {
     e.preventDefault();
-    if (!postText.trim()) return;
+    if (!postText.trim() || isPosting) return;
 
-    const newPost = {
-      id: Date.now(),
-      author: user?.name || (user?.role === 'owner' ? 'Venue Owner' : 'Athlete'),
-      avatar: user?.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${user?.role === 'owner' ? 'Owner' : 'Player'}`,
-      time: 'Just now',
-      content: postText,
-      image: postImage.trim() || null,
-      likes: 0,
-      comments: 0,
-      liked: false
-    };
+    setIsPosting(true);
+    const authorName = user?.full_name || user?.name || (user?.role === 'owner' ? 'Venue Owner' : 'Athlete');
+    const avatarUrl = user?.avatar || user?.photoURL || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(authorName)}`;
 
-    setFeedPosts([newPost, ...feedPosts]);
+    const textToSend = postText;
+    const imgToSend = postImage.trim();
+    const tagToSend = selectedTag;
+
     setPostText('');
     setPostImage('');
     setShowImageInput(false);
+
+    try {
+      await apiCreatePost({
+        author: authorName,
+        author_id: user?.id || user?.uid || 'usr_anonymous',
+        avatar: avatarUrl,
+        content: textToSend,
+        image: imgToSend || null,
+        tag: tagToSend
+      });
+      await loadDbPosts();
+    } catch (err) {
+      console.error('Failed to create post:', err);
+    } finally {
+      setIsPosting(false);
+    }
   };
 
   return (
@@ -105,237 +133,188 @@ export default function SportsFeed({ user }) {
             <Flame className="w-5 h-5 text-indigo-400" />
             <span className="text-[10px] text-indigo-400 uppercase font-extrabold tracking-widest">Real-time Feed</span>
           </div>
-          <h1 className="text-3xl font-black font-display tracking-tight uppercase text-white">Sports Feed</h1>
-          <p className="text-xs text-neutral-500 mt-0.5">Stay connected with players, post slot releases, and share arena announcements</p>
+          <h1 className="text-3xl font-black font-display tracking-tight uppercase text-white">Feed</h1>
+          <p className="text-xs text-neutral-500 mt-0.5">Share achievements, post match highlights, find teammates, and stay connected with athletes</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Feed posting & List */}
-        <div className="lg:col-span-8 space-y-6">
-          
-          {/* Post Builder Card */}
-          <div className="glass-card p-5 border border-white/8 bg-white/[0.01]">
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
-                {user?.name?.[0]?.toUpperCase() || 'O'}
-              </div>
-              <div className="flex-grow">
-                <form onSubmit={handleCreatePost} className="space-y-3">
-                  <textarea 
-                    value={postText}
-                    onChange={(e) => setPostText(e.target.value)}
-                    placeholder={user?.role === 'owner' ? "Announce slots opening, highlight tournaments, or share turf updates..." : "Looking for players, sharing achievements, or asking turf questions? Post it here..."}
-                    className="w-full bg-[#0d0d0d] border border-white/5 rounded-2xl p-4 text-sm text-neutral-300 placeholder-neutral-600 focus:outline-none focus:border-indigo-500/40 resize-none h-24 transition-colors"
-                    required
-                  />
-
-                  <AnimatePresence>
-                    {showImageInput && (
-                      <motion.div 
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden space-y-2.5 pb-2"
-                      >
-                        <div className="flex flex-col gap-2.5 p-3 bg-white/[0.01] border border-white/5 rounded-2xl">
-                          <div>
-                            <span className="text-[9px] text-neutral-500 uppercase tracking-widest font-extrabold block mb-1">Upload from local storage</span>
-                            <input 
-                              type="file"
-                              accept="image/*"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  const reader = new FileReader();
-                                  reader.onloadend = () => {
-                                    setPostImage(reader.result); // Base64 data URL
-                                  };
-                                  reader.readAsDataURL(file);
-                                }
-                              }}
-                              className="w-full text-xs text-neutral-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-[10px] file:font-bold file:bg-indigo-600/10 file:text-indigo-400 hover:file:bg-indigo-600/20 cursor-pointer"
-                            />
-                          </div>
-                          <div>
-                            <span className="text-[9px] text-neutral-500 uppercase tracking-widest font-extrabold block mb-1">Or paste image URL</span>
-                            <input 
-                              type="text"
-                              value={postImage.startsWith('data:') ? '' : postImage}
-                              onChange={(e) => setPostImage(e.target.value)}
-                              placeholder="Paste image URL here..."
-                              className="w-full bg-[#0d0d0d] border border-white/5 rounded-xl px-4 py-2 text-xs text-neutral-300 placeholder-neutral-600 focus:outline-none focus:border-indigo-500/40 transition-colors"
-                            />
-                          </div>
-                          {postImage && (
-                            <div className="relative w-full h-32 rounded-xl overflow-hidden border border-white/10 bg-black/20 mt-1">
-                              <img src={postImage} alt="Post Preview" className="w-full h-full object-cover" />
-                              <button
-                                type="button"
-                                onClick={() => setPostImage('')}
-                                className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 border border-white/10 hover:bg-black/85 text-white transition-all hover:scale-105 cursor-pointer"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
- 
-                  <div className="flex justify-between items-center pt-2 border-t border-white/5">
-                    <button 
+      <div className="max-w-4xl mx-auto space-y-6">
+        {/* Post Builder Card */}
+        <div className="glass-card p-5 border border-white/8 bg-white/[0.01] rounded-3xl">
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+              {(user?.full_name || user?.name)?.[0]?.toUpperCase() || 'A'}
+            </div>
+            <div className="flex-grow">
+              <form onSubmit={handleCreatePost} className="space-y-3">
+                {/* Category / Achievement Tags */}
+                <div className="flex flex-wrap gap-2 pb-1">
+                  {POST_TAGS.map(t => (
+                    <button
+                      key={t.id}
                       type="button"
-                      onClick={() => setShowImageInput(!showImageInput)}
-                      className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${
-                        showImageInput ? 'bg-indigo-600/10 border-indigo-500/20 text-indigo-400' : 'bg-white/5 border-white/8 text-neutral-400 hover:text-white'
+                      onClick={() => setSelectedTag(t.label)}
+                      className={`text-[11px] font-bold px-3 py-1 rounded-full border transition-all cursor-pointer ${
+                        selectedTag === t.label 
+                          ? `${t.color} shadow-sm ring-1 ring-white/20` 
+                          : 'bg-white/[0.03] text-neutral-400 border-white/5 hover:text-white'
                       }`}
                     >
-                      <Image className="w-3.5 h-3.5" />
-                      <span>{showImageInput ? 'Hide Upload Section' : 'Add Image / Upload'}</span>
+                      {t.label}
                     </button>
-                    
-                    <button 
-                      type="submit"
-                      className="px-5 py-2 bg-white hover:bg-neutral-200 text-black text-xs font-bold rounded-full transition-all flex items-center space-x-1.5 hover:scale-102"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Post Update</span>
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-
-          {/* Feed Posts */}
-          <div className="space-y-5">
-            {feedPosts.map(post => (
-              <div key={post.id} className="glass-card p-5 border border-white/5 hover:border-white/10 transition-all duration-300 bg-white/[0.003]">
-                <div className="flex items-center space-x-3 mb-4">
-                  {post.avatar ? (
-                    <img src={post.avatar} alt={post.author} className="w-10 h-10 rounded-xl object-cover border border-white/10" onError={e => { e.target.onerror = null; e.target.src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'; }} />
-                  ) : (
-                    <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-xs font-bold">
-                      {post.author?.[0]?.toUpperCase()}
-                    </div>
-                  )}
-                  <div>
-                    <h4 className="font-bold text-sm text-white font-display">{post.author}</h4>
-                    <p className="text-[10px] text-neutral-500 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {post.time}
-                    </p>
-                  </div>
+                  ))}
                 </div>
 
-                <p className="text-neutral-300 text-sm font-light leading-relaxed mb-4">
-                  {post.content}
-                </p>
+                <textarea 
+                  value={postText}
+                  onChange={(e) => setPostText(e.target.value)}
+                  placeholder={
+                    user?.role === 'owner' 
+                      ? "Announce slots opening, highlight tournaments, or share turf updates..." 
+                      : "Share your sports achievement, match victory, looking for players, or highlights..."
+                  }
+                  className="w-full bg-[#0d0d0d] border border-white/5 rounded-2xl p-4 text-sm text-neutral-300 placeholder-neutral-600 focus:outline-none focus:border-indigo-500/40 resize-none h-24 transition-colors"
+                  required
+                />
 
-                {post.image && (
-                  <div className="rounded-2xl overflow-hidden max-h-80 mb-4 border border-white/5">
-                    <img src={post.image} alt="Media content" className="w-full h-full object-cover brightness-95" />
-                  </div>
-                )}
+                <AnimatePresence>
+                  {showImageInput && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden space-y-2.5 pb-2"
+                    >
+                      <div className="flex flex-col gap-2.5 p-3 bg-white/[0.01] border border-white/5 rounded-2xl">
+                        <div>
+                          <span className="text-[9px] text-neutral-500 uppercase tracking-widest font-extrabold block mb-1">Choose Photo or Video from device</span>
+                          <input 
+                            type="file"
+                            accept="image/*,video/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  setPostImage(reader.result);
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                            className="w-full text-xs text-neutral-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-[10px] file:font-bold file:bg-indigo-600/10 file:text-indigo-400 hover:file:bg-indigo-600/20 cursor-pointer"
+                          />
+                        </div>
+                        {postImage && (
+                          <div className="relative w-full h-36 rounded-xl overflow-hidden border border-white/10 bg-black/20 mt-1">
+                            {postImage.startsWith('data:video') || postImage.match(/\.(mp4|webm|ogg)($|\?)/i) ? (
+                              <video src={postImage} controls className="w-full h-full object-cover" />
+                            ) : (
+                              <img src={postImage} alt="Post Preview" className="w-full h-full object-cover" />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setPostImage('')}
+                              className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 border border-white/10 hover:bg-black/85 text-white transition-all hover:scale-105 cursor-pointer z-10"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-                <div className="flex items-center justify-between pt-3 border-t border-white/5 text-neutral-500">
+                <div className="flex justify-between items-center pt-2 border-t border-white/5">
                   <button 
-                    onClick={() => handleLikePost(post.id)}
-                    className={`flex items-center text-xs space-x-1.5 hover:text-white transition-colors ${
-                      post.liked ? 'text-rose-400 font-bold' : ''
+                    type="button"
+                    onClick={() => setShowImageInput(!showImageInput)}
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs transition-all cursor-pointer ${
+                      showImageInput ? 'bg-indigo-600/10 border-indigo-500/20 text-indigo-400' : 'bg-white/5 border-white/8 text-neutral-400 hover:text-white'
                     }`}
                   >
-                    <Heart className={`w-4 h-4 ${post.liked ? 'fill-rose-500 text-rose-500' : ''}`} />
-                    <span>{post.likes} Likes</span>
+                    <Image className="w-3.5 h-3.5" />
+                    <span>{showImageInput ? 'Hide Upload Section' : 'Add Photo / Video'}</span>
                   </button>
-
-                  <button className="flex items-center text-xs space-x-1.5 hover:text-white transition-colors">
-                    <MessageSquare className="w-4 h-4" />
-                    <span>{post.comments} Comments</span>
-                  </button>
-
-                  <button className="hover:text-white transition-colors flex items-center space-x-1">
-                    <Share2 className="w-4 h-4" />
+                  
+                  <button 
+                    type="submit"
+                    disabled={isPosting}
+                    className="px-5 py-2 bg-white hover:bg-neutral-200 text-black text-xs font-bold rounded-full transition-all flex items-center space-x-1.5 hover:scale-102 cursor-pointer disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{isPosting ? 'Posting...' : 'Post to Feed'}</span>
                   </button>
                 </div>
-              </div>
-            ))}
+              </form>
+            </div>
           </div>
-
         </div>
 
-        {/* Right Column: Guidelines & Stats */}
-        <div className="lg:col-span-4 space-y-6">
-          
-          {/* Dynamic Feed Tips Widget */}
-          <div className="glass-card p-5 border border-white/5 space-y-4">
-            <div className="flex items-center space-x-2 pb-3 border-b border-white/5">
-              <Zap className="w-4.5 h-4.5 text-indigo-400 animate-pulse" />
-              <h3 className="font-display font-extrabold text-sm uppercase tracking-wider text-white">
-                {user?.role === 'owner' ? 'Owner Dashboard Tips' : 'Athlete Feed Guidelines'}
-              </h3>
-            </div>
-            {user?.role === 'owner' ? (
-              <div className="space-y-4 text-xs font-light text-neutral-400 text-left">
-                <div className="p-3 bg-white/[0.01] border border-white/5 rounded-xl space-y-1">
-                  <p className="font-bold text-white uppercase tracking-wider text-[9px] text-indigo-400">🔥 Post Slot Releases</p>
-                  <p className="leading-relaxed">Announce last-minute slots or price drops. Players will see them directly in their discover feeds.</p>
-                </div>
-                <div className="p-3 bg-white/[0.01] border border-white/5 rounded-xl space-y-1">
-                  <p className="font-bold text-white uppercase tracking-wider text-[9px] text-amber-400">🏆 Highlight Tournaments</p>
-                  <p className="leading-relaxed">Promote upcoming tournament registration links and bracket drawings to increase team sign-ups.</p>
-                </div>
-                <div className="p-3 bg-white/[0.01] border border-white/5 rounded-xl space-y-1">
-                  <p className="font-bold text-white uppercase tracking-wider text-[9px] text-emerald-400">💬 Connect Directly</p>
-                  <p className="leading-relaxed">Answer questions left in comments or group chats instantly to maintain a high ratings score.</p>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4 text-xs font-light text-neutral-400 text-left">
-                <div className="p-3 bg-white/[0.01] border border-white/5 rounded-xl space-y-1">
-                  <p className="font-bold text-white uppercase tracking-wider text-[9px] text-indigo-400">🔥 Find Match Sessions</p>
-                  <p className="leading-relaxed">Spot friendly games or slot openings created by other local players and join in.</p>
-                </div>
-                <div className="p-3 bg-white/[0.01] border border-white/5 rounded-xl space-y-1">
-                  <p className="font-bold text-white uppercase tracking-wider text-[9px] text-amber-400">🎟️ Grab Turf Offers</p>
-                  <p className="leading-relaxed">Watch out for venue owner announcements on last-minute booking discounts and monthly passes.</p>
-                </div>
-                <div className="p-3 bg-white/[0.01] border border-white/5 rounded-xl space-y-1">
-                  <p className="font-bold text-white uppercase tracking-wider text-[9px] text-emerald-400">💬 Match Coordination</p>
-                  <p className="leading-relaxed">Leave comments or connect in group chats to coordinate squad size, time slots, and play times.</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Trending Communities */}
-          <div className="glass-card p-5 border border-white/5 space-y-4">
-            <div className="flex items-center space-x-2 pb-3 border-b border-white/5">
-              <Trophy className="w-4.5 h-4.5 text-amber-400" />
-              <h3 className="font-display font-extrabold text-sm uppercase tracking-wider text-white">Trending Arenas</h3>
-            </div>
-            <div className="space-y-3">
-              {[
-                { name: 'Vanguard Sports Arena', location: 'Chennai', trend: '+15%', rating: 4.9 },
-                { name: 'Apex Bowling Syndicate', location: 'Chennai', trend: '+8%', rating: 4.8 },
-                { name: 'Smash Masters Badminton', location: 'Chennai', trend: '+12%', rating: 4.8 }
-              ].map((item, index) => (
-                <div key={item.name} className="flex justify-between items-center">
-                  <div className="flex items-center space-x-3 text-left">
-                    <span className="w-6 h-6 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-white">{index + 1}</span>
-                    <div>
-                      <p className="text-xs font-bold text-white leading-tight">{item.name}</p>
-                      <p className="text-[10px] text-neutral-500">{item.location} · ⭐ {item.rating}</p>
-                    </div>
+        {/* Feed Posts */}
+        <div className="space-y-5">
+          {feedPosts.map(post => (
+            <div key={post.id} className="glass-card p-5 border border-white/5 hover:border-white/10 transition-all duration-300 bg-white/[0.003] rounded-3xl">
+              <div className="flex items-center space-x-3 mb-4">
+                {post.avatar ? (
+                  <img src={post.avatar} alt={post.author} className="w-10 h-10 rounded-xl object-cover border border-white/10" onError={e => { e.target.onerror = null; e.target.src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'; }} />
+                ) : (
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-xs font-bold">
+                    {post.author?.[0]?.toUpperCase()}
                   </div>
-                  <span className="text-[10px] font-extrabold text-emerald-400">{item.trend}</span>
+                )}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-sm text-white font-display">{post.author}</h4>
+                    {post.tag && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/25">
+                        {post.tag}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-neutral-500 flex items-center gap-1 mt-0.5">
+                    <Clock className="w-3 h-3" />
+                    {post.time}
+                  </p>
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
 
+              <p className="text-neutral-300 text-sm font-light leading-relaxed mb-4 whitespace-pre-wrap">
+                {post.content}
+              </p>
+
+              {post.image && (
+                <div className="rounded-2xl overflow-hidden max-h-80 mb-4 border border-white/5">
+                  {post.image.startsWith('data:video') || post.image.match(/\.(mp4|webm|ogg)($|\?)/i) ? (
+                    <video src={post.image} controls className="w-full h-full object-cover" />
+                  ) : (
+                    <img src={post.image} alt="Media content" className="w-full h-full object-cover brightness-95" />
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-3 border-t border-white/5 text-neutral-500">
+                <button 
+                  onClick={() => handleLikePost(post.id)}
+                  className={`flex items-center text-xs space-x-1.5 hover:text-white transition-colors cursor-pointer ${
+                    post.liked ? 'text-rose-400 font-bold' : ''
+                  }`}
+                >
+                  <Heart className={`w-4 h-4 ${post.liked ? 'fill-rose-500 text-rose-500' : ''}`} />
+                  <span>{post.likes} Likes</span>
+                </button>
+
+                <button className="flex items-center text-xs space-x-1.5 hover:text-white transition-colors cursor-pointer">
+                  <MessageSquare className="w-4 h-4" />
+                  <span>{post.comments} Comments</span>
+                </button>
+
+                <button className="hover:text-white transition-colors flex items-center space-x-1 cursor-pointer">
+                  <Share2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

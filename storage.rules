@@ -1,0 +1,47 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ── 1. User Directories ─────────────────────────────────
+    // Each user can ONLY read and write media files inside their own directory
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /avatars/{userId}/{allPaths=**} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // ── 2. Venue & Turf Media ──────────────────────────────
+    match /venue-images/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // ── 3. Marketplace Item Media ──────────────────────────
+    match /marketplace/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // ── 4. Chat Attachments ────────────────────────────────
+    match /chat-attachments/{conversationId}/{fileName} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Fallback: DENY all other storage access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

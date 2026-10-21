@@ -12,916 +12,925 @@ import {
   ShieldAlert, 
   Sparkles,
   X,
-  Moon,
-  Sun,
   Lock,
-  Volume2
+  ArrowLeftRight,
+  Trash2,
+  Loader2,
+  AlertTriangle,
+  Camera,
+  Check,
+  Flame,
+  ShieldCheck,
+  Clock,
+  Share2,
+  Copy,
+  Hash,
+  AlertCircle
 } from 'lucide-react';
+import { apiUpdateProfile, apiDeleteAccount } from '../services/db';
+import UserAvatar from '../components/UserAvatar';
+
+const ALL_AVAILABLE_SPORTS = ['Football', 'Cricket', 'Badminton', 'Basketball', 'Tennis', 'Table Tennis', 'Volleyball', 'Pickleball', 'Bowling', 'Swimming', 'Squash'];
+
+const getSportEmoji = (name) => {
+  const map = {
+    'Football': '⚽',
+    'Cricket': '🏏',
+    'Badminton': '🏸',
+    'Basketball': '🏀',
+    'Tennis': '🎾',
+    'Table Tennis': '🏓',
+    'Volleyball': '🏐',
+    'Pickleball': '🎾',
+    'Bowling': '🎳',
+    'Swimming': '🏊',
+    'Squash': '💥'
+  };
+  return map[name] || '🏆';
+};
+
+/* ─── Interactive PFP Crop & Reposition Modal ───────────── */
+function PfpCropModal({ imageSrc, onClose, onConfirm }) {
+  const [scale, setScale] = useState(1);
+  const [posX, setPosX] = useState(0);
+  const [posY, setPosY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, initialX: 0, initialY: 0 });
+
+  const handleStart = (clientX, clientY) => {
+    setIsDragging(true);
+    dragStart.current = { x: clientX, y: clientY, initialX: posX, initialY: posY };
+  };
+
+  const handleMove = (clientX, clientY) => {
+    if (!isDragging) return;
+    const dx = clientX - dragStart.current.x;
+    const dy = clientY - dragStart.current.y;
+    setPosX(dragStart.current.initialX + dx);
+    setPosY(dragStart.current.initialY + dy);
+  };
+
+  const handleEnd = () => {
+    setIsDragging(false);
+  };
+
+  const handleConfirm = () => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const size = 400; // Resolution 400x400
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+
+      // Clip circle
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+
+      // Dark background fill
+      ctx.fillStyle = '#09090b';
+      ctx.fillRect(0, 0, size, size);
+
+      // Viewport size is 260px, Circular Mask is 210px
+      // Scale ratio to canvas: 400 / 210 = 1.9047
+      const ratio = size / 210;
+
+      const imgAspect = img.width / img.height;
+      let baseW = 260;
+      let baseH = 260;
+      if (imgAspect >= 1) {
+        baseW = 260;
+        baseH = 260 / imgAspect;
+      } else {
+        baseH = 260;
+        baseW = 260 * imgAspect;
+      }
+
+      ctx.save();
+      ctx.translate(size / 2 + posX * ratio, size / 2 + posY * ratio);
+      ctx.scale(scale, scale);
+
+      const drawW = baseW * ratio;
+      const drawH = baseH * ratio;
+      ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+      ctx.restore();
+
+      const croppedUrl = canvas.toDataURL('image/jpeg', 0.92);
+      onConfirm(croppedUrl);
+    };
+    img.src = imageSrc;
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div onClick={onClose} className="absolute inset-0 bg-black/85 backdrop-blur-md" />
+      <div className="relative glass-card border border-white/10 rounded-3xl p-6 max-w-sm w-full z-10 text-center space-y-5 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-white/10 pb-3">
+          <div className="text-left">
+            <h3 className="font-display font-extrabold text-white text-base">Crop Profile Picture</h3>
+            <p className="text-[11px] text-neutral-400 mt-0.5">Drag & zoom full photo into the circle</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-full bg-white/5 text-neutral-400 hover:text-white cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Viewport displaying the full photo with circular mask */}
+        <div 
+          onMouseDown={(e) => { e.preventDefault(); handleStart(e.clientX, e.clientY); }}
+          onMouseMove={(e) => handleMove(e.clientX, e.clientY)}
+          onMouseUp={handleEnd}
+          onMouseLeave={handleEnd}
+          onTouchStart={(e) => e.touches.length && handleStart(e.touches[0].clientX, e.touches[0].clientY)}
+          onTouchMove={(e) => e.touches.length && handleMove(e.touches[0].clientX, e.touches[0].clientY)}
+          onTouchEnd={handleEnd}
+          className="w-[260px] h-[260px] mx-auto rounded-2xl overflow-hidden bg-neutral-950 border border-white/10 relative cursor-move select-none shadow-2xl"
+        >
+          {/* Full Uncropped Photo */}
+          <div 
+            className="w-full h-full flex items-center justify-center relative"
+            style={{
+              transform: `translate(${posX}px, ${posY}px) scale(${scale})`,
+              transformOrigin: 'center'
+            }}
+          >
+            <img 
+              src={imageSrc} 
+              alt="Full Photo" 
+              className="max-w-full max-h-full object-contain pointer-events-none"
+            />
+          </div>
+
+          {/* Circular Cutout Overlay Mask */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-[210px] h-[210px] rounded-full border-2 border-indigo-500 shadow-[0_0_0_9999px_rgba(0,0,0,0.7)] flex items-center justify-center">
+              <span className="text-[9px] font-bold text-white/80 uppercase tracking-wider bg-black/60 px-2.5 py-1 rounded-full backdrop-blur-sm">Drag photo</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Zoom Slider */}
+        <div className="space-y-1.5 px-2">
+          <div className="flex justify-between text-[10px] text-neutral-400 font-bold uppercase tracking-wider">
+            <span>Zoom / Fit</span>
+            <span>{scale.toFixed(2)}x</span>
+          </div>
+          <input 
+            type="range" min="0.5" max="3.5" step="0.05" value={scale}
+            onChange={(e) => setScale(parseFloat(e.target.value))}
+            className="w-full accent-indigo-500 bg-neutral-800 rounded-lg cursor-pointer h-1.5"
+          />
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex items-center justify-between gap-3 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-5 py-2.5 rounded-full text-xs font-bold text-neutral-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            onClick={handleConfirm}
+            className="px-6 py-2.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs uppercase tracking-wider transition-all flex items-center space-x-1.5 shadow-lg shadow-indigo-600/30 cursor-pointer"
+          >
+            <Check className="w-4 h-4 stroke-[3]" />
+            <span>OK</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Profile({ 
   user, 
   role, 
   onLogout, 
   onSwitchRole, 
+  onOpenProfileSwitcher,
   onUpdateUser,
   setRole 
 }) {
+  const todayDayNum = new Date().getDate();
+  const currentMonthName = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [activeTab, setActiveTab] = useState('Overview');
-  const [selectedDay, setSelectedDay] = useState(2);
+  const [selectedDay, setSelectedDay] = useState(todayDayNum);
+  const [isSaving, setIsSaving] = useState(false);
 
-  // Edit Profile States
-  const [editName, setEditName] = useState(user?.name || '');
-  const [editTitle, setEditTitle] = useState(user?.title || (role === 'owner' ? 'Venue Owner • Turfington Gold Club' : 'Elite Athlete • Turfington Gold Club'));
-  const [editAvatar, setEditAvatar] = useState(user?.avatar || '');
-  const [editAvatarScale, setEditAvatarScale] = useState(user?.avatarScale || 1);
-  const [editAvatarX, setEditAvatarX] = useState(user?.avatarX || 0);
-  const [editAvatarY, setEditAvatarY] = useState(user?.avatarY || 0);
-  const [editCoverImage, setEditCoverImage] = useState(user?.coverImage || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&q=80');
-  const [editCoverScale, setEditCoverScale] = useState(user?.coverScale || 1);
-  const [editCoverX, setEditCoverX] = useState(user?.coverX || 0);
-  const [editCoverY, setEditCoverY] = useState(user?.coverY || 0);
+  // Edit Profile States (Simple WhatsApp / Instagram Style)
+  const rawPlayerId = (typeof user?.player_id === 'string' && user.player_id)
+    || (typeof user?.handle === 'string' && user.handle)
+    || (typeof user?.username === 'string' && user.username)
+    || '';
+  const initialPlayerId = rawPlayerId
+    ? (rawPlayerId.startsWith('@') ? rawPlayerId : `@${rawPlayerId}`)
+    : `@${(user?.full_name || user?.name || user?.email?.split('@')[0] || 'player').toString().toLowerCase().replace(/[^a-z0-9]/g, '')}_${(user?.id || user?.firebase_uid || '9842').toString().slice(-4)}`;
 
-  const [isDraggingAvatar, setIsDraggingAvatar] = useState(false);
-  const [isDraggingCover, setIsDraggingCover] = useState(false);
-  const avatarDragStart = useRef({ x: 0, y: 0, imageX: 0, imageY: 0, width: 1, height: 1 });
-  const coverDragStart = useRef({ x: 0, y: 0, imageX: 0, imageY: 0, width: 1, height: 1 });
+  const [editName, setEditName] = useState(user?.full_name || user?.name || '');
+  const [editTitle, setEditTitle] = useState(user?.title || (role === 'owner' ? 'Venue Owner' : 'Sports Player'));
+  const [editAvatar, setEditAvatar] = useState(user?.avatar_url || user?.avatar || '');
+  const [editPlayerId, setEditPlayerId] = useState(initialPlayerId);
+  const [copiedId, setCopiedId] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
 
-  const handleAvatarStart = (clientX, clientY, currentTarget) => {
-    const rect = currentTarget.getBoundingClientRect();
-    setIsDraggingAvatar(true);
-    avatarDragStart.current = {
-      x: clientX,
-      y: clientY,
-      imageX: editAvatarX,
-      imageY: editAvatarY,
-      width: rect.width || 144,
-      height: rect.height || 144
-    };
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 3200);
   };
 
-  const handleAvatarMove = (clientX, clientY) => {
-    if (!isDraggingAvatar) return;
-    const dx = clientX - avatarDragStart.current.x;
-    const dy = clientY - avatarDragStart.current.y;
-    const pctX = avatarDragStart.current.imageX + (dx / (avatarDragStart.current.width * editAvatarScale)) * 100;
-    const pctY = avatarDragStart.current.imageY + (dy / (avatarDragStart.current.height * editAvatarScale)) * 100;
-    setEditAvatarX(Math.max(-100, Math.min(100, pctX)));
-    setEditAvatarY(Math.max(-100, Math.min(100, pctY)));
-  };
-
-  const handleAvatarEnd = () => {
-    setIsDraggingAvatar(false);
-  };
-
-  const onAvatarMouseDown = (e) => {
-    e.preventDefault();
-    handleAvatarStart(e.clientX, e.clientY, e.currentTarget);
-  };
-
-  const onAvatarMouseMove = (e) => {
-    handleAvatarMove(e.clientX, e.clientY);
-  };
-
-  const onAvatarTouchStart = (e) => {
-    if (e.touches.length > 0) {
-      handleAvatarStart(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget);
-    }
-  };
-
-  const onAvatarTouchMove = (e) => {
-    if (e.touches.length > 0) {
-      handleAvatarMove(e.touches[0].clientX, e.touches[0].clientY);
-    }
-  };
-
-  const handleCoverStart = (clientX, clientY, currentTarget) => {
-    const rect = currentTarget.getBoundingClientRect();
-    setIsDraggingCover(true);
-    coverDragStart.current = {
-      x: clientX,
-      y: clientY,
-      imageX: editCoverX,
-      imageY: editCoverY,
-      width: rect.width || 370,
-      height: rect.height || 96
-    };
-  };
-
-  const handleCoverMove = (clientX, clientY) => {
-    if (!isDraggingCover) return;
-    const dx = clientX - coverDragStart.current.x;
-    const dy = clientY - coverDragStart.current.y;
-    const pctX = coverDragStart.current.imageX + (dx / (coverDragStart.current.width * editCoverScale)) * 100;
-    const pctY = coverDragStart.current.imageY + (dy / (coverDragStart.current.height * editCoverScale)) * 100;
-    setEditCoverX(Math.max(-100, Math.min(100, pctX)));
-    setEditCoverY(Math.max(-100, Math.min(100, pctY)));
-  };
-
-  const handleCoverEnd = () => {
-    setIsDraggingCover(false);
-  };
-
-  const onCoverMouseDown = (e) => {
-    e.preventDefault();
-    handleCoverStart(e.clientX, e.clientY, e.currentTarget);
-  };
-
-  const onCoverMouseMove = (e) => {
-    handleCoverMove(e.clientX, e.clientY);
-  };
-
-  const onCoverTouchStart = (e) => {
-    if (e.touches.length > 0) {
-      handleCoverStart(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget);
-    }
-  };
-
-  const onCoverTouchMove = (e) => {
-    if (e.touches.length > 0) {
-      handleCoverMove(e.touches[0].clientX, e.touches[0].clientY);
-    }
-  };
+  // PFP Crop Modal State
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [rawCropImage, setRawCropImage] = useState('');
+  const avatarFileInputRef = useRef(null);
 
   useEffect(() => {
     if (user) {
-      setEditName(user.name || '');
-      setEditTitle(user.title || (role === 'owner' ? 'Venue Owner • Turfington Gold Club' : 'Elite Athlete • Turfington Gold Club'));
-      setEditAvatar(user.avatar || '');
-      setEditAvatarScale(user.avatarScale || 1);
-      setEditAvatarX(user.avatarX || 0);
-      setEditAvatarY(user.avatarY || 0);
-      setEditCoverImage(user.coverImage || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&q=80');
-      setEditCoverScale(user.coverScale || 1);
-      setEditCoverX(user.coverX || 0);
-      setEditCoverY(user.coverY || 0);
+      setEditName(user.full_name || user.name || '');
+      setEditTitle(user.title || (role === 'owner' ? 'Venue Owner' : 'Sports Player'));
+      setEditAvatar(user.avatar_url || user.avatar || '');
+      const pid = (typeof user.player_id === 'string' && user.player_id)
+        || (typeof user.handle === 'string' && user.handle)
+        || (typeof user.username === 'string' && user.username)
+        || '';
+      setEditPlayerId(pid ? (pid.startsWith('@') ? pid : `@${pid}`) : initialPlayerId);
     }
-  }, [user, role]);
+  }, [user, role, initialPlayerId]);
 
-  const PRESET_AVATARS = [
-    'https://api.dicebear.com/7.x/bottts/svg?seed=Felix',
-    'https://api.dicebear.com/7.x/adventurer/svg?seed=Dusty',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Bubba',
-    'https://api.dicebear.com/7.x/fun-emoji/svg?seed=Sassy',
-    'https://api.dicebear.com/7.x/shapes/svg?seed=Spooky',
-  ];
-
-  const PRESET_COVERS = [
-    'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&q=80',
-    'https://images.unsplash.com/photo-1618005154255-6028756c82a1?w=800&q=80',
-    'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=800&q=80',
-    'https://images.unsplash.com/photo-1550859492-d5da9d8e45f3?w=800&q=80',
-    'https://images.unsplash.com/photo-1618005198143-d3667c134812?w=800&q=80',
-  ];
-
-  const handleAvatarFileChange = (e) => {
+  const handleAvatarFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setEditAvatar(reader.result);
+        setRawCropImage(reader.result);
+        setShowCropModal(true);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleCoverFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setEditCoverImage(reader.result);
-      };
-      reader.readAsDataURL(file);
+  const handleCopyPlayerId = () => {
+    const targetId = editPlayerId || initialPlayerId;
+    navigator.clipboard.writeText(targetId);
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 2000);
+    showToast(`✓ Player ID ${targetId} copied! Share it to connect.`);
+  };
+
+  const handleShareProfile = () => {
+    const targetId = editPlayerId || initialPlayerId;
+    const cleanHandle = targetId.replace(/^@/, '');
+    const shareText = `Connect with me on Turfington! My Player ID is ${targetId} (https://turfington.app/player/${cleanHandle})`;
+
+    if (navigator.share) {
+      navigator.share({
+        title: `${editName || 'Player'} on Turfington`,
+        text: shareText,
+        url: `https://turfington.app/player/${cleanHandle}`
+      }).catch(() => {
+        navigator.clipboard.writeText(shareText);
+        showToast(`✓ Profile link & Player ID ${targetId} copied!`);
+      });
+    } else {
+      navigator.clipboard.writeText(shareText);
+      showToast(`✓ Profile link & Player ID ${targetId} copied!`);
+    }
+  };
+
+  const handleSaveProfile = async (e) => {
+    if (e) e.preventDefault();
+    setIsSaving(true);
+    try {
+      const targetId = user?.id || user?.firebase_uid || user?.email || user?.username;
+      const formattedPlayerId = (typeof editPlayerId === 'string' && editPlayerId.startsWith('@')) ? editPlayerId : `@${editPlayerId}`;
+
+      if (targetId) {
+        const { success, error } = await apiUpdateProfile(targetId, {
+          full_name: editName,
+          title: editTitle,
+          avatar_url: editAvatar,
+          avatar: editAvatar,
+          player_id: formattedPlayerId,
+          handle: formattedPlayerId
+        });
+        if (!success) {
+          alert('Failed to save profile to database: ' + error);
+          setIsSaving(false);
+          return;
+        }
+      }
+
+      if (onUpdateUser) {
+        onUpdateUser({
+          full_name: editName,
+          title: editTitle,
+          avatar_url: editAvatar,
+          avatar: editAvatar,
+          player_id: formattedPlayerId,
+          handle: formattedPlayerId
+        });
+      }
+      setIsSettingsOpen(false);
+      showToast('✓ Profile & Player ID updated!');
+    } catch (err) {
+      console.error('Failed to save profile:', err);
+      alert('An error occurred while saving profile.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
   // Profile data
+  const userStats = Array.isArray(user?.stats) ? user.stats : (role === 'owner' ? [
+    { name: 'Hosted Events', value: '0' },
+    { name: 'Followers', value: '0' },
+    { name: 'Following', value: '0' },
+    { name: 'Rating', value: '5.0' }
+  ] : [
+    { name: 'Matches', value: '0' },
+    { name: 'Followers', value: '0' },
+    { name: 'Following', value: '0' },
+    { name: 'Win Rate', value: '0%' }
+  ]);
+
+  const rawInterests = (Array.isArray(user?.sports_interests) && user.sports_interests.length > 0)
+    ? user.sports_interests
+    : (Array.isArray(user?.interests) && user.interests.length > 0)
+      ? user.interests
+      : ['Football', 'Cricket', 'Badminton'];
+
+  const sportsInterestsList = rawInterests.map(i => {
+    if (typeof i === 'string') return i;
+    if (i && typeof i === 'object') return i.sport || i.name || 'Sports';
+    return String(i || 'Sports');
+  });
+
+  const rawAvatar = (typeof user?.avatar_url === 'string' && user.avatar_url)
+    || (typeof user?.avatar === 'string' && user.avatar)
+    || '';
+  const isCustomPhoto = Boolean(
+    rawAvatar
+    && typeof rawAvatar === 'string'
+    && !rawAvatar.includes('ui-avatars.com')
+    && (rawAvatar.startsWith('data:') || rawAvatar.startsWith('http'))
+  );
+  const fullNameStr = (user?.full_name || user?.name || user?.email || 'Player').toString();
+  const firstInitial = fullNameStr.trim().charAt(0).toUpperCase() || 'P';
+
   const profile = {
-    name: user?.name || 'Pooja Reddy',
-    title: user?.title || (role === 'owner' ? 'Venue Owner • Turfington Gold Club' : 'Elite Athlete • Turfington Gold Club'),
-    avatar: user?.avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=Felix',
-    coverImage: user?.coverImage || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&q=80',
-    stats: role === 'owner' ? [
-      { name: 'Hosted Events', value: '12' },
-      { name: 'Followers', value: '1,240' },
-      { name: 'Following', value: '84' },
-      { name: 'Rating', value: '4.9' }
-    ] : [
-      { name: 'Matches', value: '48' },
-      { name: 'Followers', value: '324' },
-      { name: 'Following', value: '184' },
-      { name: 'Win Rate', value: '68%' }
-    ],
-    interests: role === 'owner' ? [
-      { sport: 'Football', level: 'Host', icon: '⚽' },
-      { sport: 'Badminton', level: 'Host', icon: '🏸' },
-      { sport: 'Table Tennis', level: 'Host', icon: '🏓' }
-    ] : [
-      { sport: 'Football', level: 'Advanced', icon: '⚽' },
-      { sport: 'Badminton', level: 'Intermediate', icon: '🏸' },
-      { sport: 'Table Tennis', level: 'Advanced', icon: '🏓' }
-    ],
-    achievements: role === 'owner' ? [
-      { id: 1, title: 'Elite Arena Host', desc: 'Maintained 4.9/5 star venue reviews', icon: '🏟️', date: 'May 2026', unlocked: true },
-      { id: 2, title: 'Grand Tourney Organiser', desc: 'Hosted 5 tournaments successfully', icon: '🏆', date: 'Mar 2026', unlocked: true },
-      { id: 3, title: 'Super Host Pro', desc: 'Complete 100 total slot bookings at your arenas', icon: '⭐', unlocked: false, progress: { current: 76, total: 100 } },
-      { id: 4, title: 'Weekend Wonder', desc: 'Exceed 95% peak slot occupancy on a Saturday', icon: '🎉', unlocked: false, progress: { current: 88, total: 95 } },
-      { id: 5, title: 'Community Sponsor', desc: 'Sponsor a local tournament with a cash prize', icon: '🤝', unlocked: false }
-    ] : [
-      { id: 1, title: 'Century Scorer', desc: 'Played 100 total matches in a season', icon: '🏆', date: 'May 2026', unlocked: true },
-      { id: 2, title: 'Clean Sheet Champion', desc: 'Conceded zero goals in 5 consecutive matches', icon: '🛡️', date: 'Apr 2026', unlocked: true },
-      { id: 3, title: 'Early Bird', desc: 'Booked a court before 7:00 AM', icon: '🌅', date: 'Feb 2026', unlocked: true },
-      { id: 4, title: 'Century Club', desc: 'Play 100 matches on Turfington', icon: '🎖️', unlocked: false, progress: { current: 48, total: 100 } },
-      { id: 5, title: 'Community Pillar', desc: 'Join 5 different sports clubs', icon: '🤝', unlocked: false, progress: { current: 1, total: 5 } },
-      { id: 6, title: 'MVP Legend', desc: 'Voted Player of the Match 10 times', icon: '⭐', unlocked: false, progress: { current: 3, total: 10 } },
-      { id: 7, title: 'Perfect Streak', desc: 'Win 5 consecutive matches in any sport', icon: '🔥', unlocked: false, progress: { current: 2, total: 5 } },
-      { id: 8, title: 'Night Owl', desc: 'Complete a match after 10:00 PM', icon: '🌙', unlocked: false }
-    ],
-    history: role === 'owner' ? [
-      { id: 1, title: 'Hosted Summer Football Cup', venue: 'Vanguard Arena', date: 'May 24, 2026', result: 'Completed', xp: '+500 XP' },
-      { id: 2, title: 'Slots Published', venue: 'Smash Club', date: 'May 21, 2026', result: '16 Slots Released', xp: '+100 XP' },
-      { id: 3, title: 'Apex Bowling Scrimmage Host', venue: 'Apex Bowling & Games', date: 'May 18, 2026', result: '12 Players Joined', xp: '+200 XP' }
-    ] : [
-      { id: 1, title: 'Football Turf Scrimmage', venue: 'Vanguard Arena', date: 'May 24, 2026', result: 'Won (4-2)', xp: '+120 XP' },
-      { id: 2, title: 'Badminton Doubles Ladder', venue: 'Smash Club', date: 'May 21, 2026', result: 'Lost (18-21)', xp: '+40 XP' },
-      { id: 3, title: 'Table Tennis Professional', venue: 'Elite Courts', date: 'May 18, 2026', result: 'Won (3-0)', xp: '+150 XP' }
-    ]
+    name: user?.full_name || user?.name || 'Turfington Player',
+    title: user?.title || (role === 'owner' ? 'Venue Owner' : 'Sports Player'),
+    avatar: isCustomPhoto ? rawAvatar : null,
+    firstInitial,
+    stats: userStats,
+    interests: sportsInterestsList.map(s => ({ sport: s, level: 'Player', icon: getSportEmoji(s) }))
   };
 
-  const juneActivity = [
-    { day: 1, weight: 0, matches: [] },
-    { day: 2, weight: 2, matches: [{ title: 'Football Turf Session', venue: 'VK Multi Sports Turf', time: '6:00 PM', type: 'Match' }, { title: 'Box Cricket T10 Match', venue: 'Clash on turf', time: '9:00 PM', type: 'Match' }] },
-    { day: 3, weight: 0, matches: [] },
-    { day: 4, weight: 1, matches: [{ title: 'Badminton Doubles Club', venue: 'Tlk turf for badminton', time: '7:30 PM', type: 'Practice' }] },
-    { day: 5, weight: 0, matches: [] },
-    { day: 6, weight: 3, matches: [{ title: 'Weekend Football Gold Cup', venue: 'Vanguard Sports Arena', time: '10:00 AM', type: 'Tournament' }, { title: 'TT Professional Practice', venue: 'A.s 360 Turf Academy', time: '4:00 PM', type: 'Practice' }, { title: 'Bowling Party Night', venue: 'Bowling in vr mall', time: '9:00 PM', type: 'Practice' }] },
-    { day: 7, weight: 1, matches: [{ title: 'Box Cricket T10 Match', venue: 'Clash on turf', time: '7:00 AM', type: 'Match' }] },
-    { day: 8, weight: 0, matches: [] },
-    { day: 9, weight: 2, matches: [{ title: 'Football Turf Session', venue: 'VK Multi Sports Turf', time: '6:00 PM', type: 'Match' }, { title: 'TT Doubles Match', venue: 'A.s 360 Turf Academy', time: '8:00 PM', type: 'Match' }] },
-    { day: 10, weight: 0, matches: [] },
-    { day: 11, weight: 0, matches: [] },
-    { day: 12, weight: 3, matches: [{ title: 'Badminton Doubles Club', venue: 'Tlk turf for badminton', time: '6:30 PM', type: 'Match' }, { title: 'Bowling Tournament Practice', venue: 'Bowling in vr mall', time: '8:00 PM', type: 'Practice' }, { title: 'Friendly Futsal Match', venue: 'VK Multi Sports Turf', time: '10:00 PM', type: 'Match' }] },
-    { day: 13, weight: 1, matches: [{ title: 'Championship Table Tennis Open', venue: 'Elite Courts', time: '2:00 PM', type: 'Tournament' }] },
-    { day: 14, weight: 0, matches: [] },
-    { day: 15, weight: 2, matches: [{ title: 'Turfington Summer Football Cup', venue: 'Vanguard Sports Arena', time: '5:00 PM', type: 'Tournament' }, { title: 'Box Cricket Practice', venue: 'Clash on turf', time: '8:00 PM', type: 'Practice' }] },
-    { day: 16, weight: 1, matches: [{ title: 'Football Turf Session', venue: 'VK Multi Sports Turf', time: '6:00 PM', type: 'Match' }] },
-    { day: 17, weight: 0, matches: [] },
-    { day: 18, weight: 0, matches: [] },
-    { day: 19, weight: 3, matches: [{ title: 'Badminton Morning Doubles', venue: 'Tlk turf for badminton', time: '9:00 AM', type: 'Match' }, { title: 'Bowling League Night', venue: 'Bowling in vr mall', time: '7:00 PM', type: 'Tournament' }, { title: 'Friday Night Football', venue: 'VK Multi Sports Turf', time: '9:30 PM', type: 'Match' }] },
-    { day: 20, weight: 0, matches: [] },
-    { day: 21, weight: 1, matches: [{ title: 'TT Doubles Match', venue: 'A.s 360 Turf Academy', time: '4:00 PM', type: 'Match' }] },
-    { day: 22, weight: 0, matches: [] },
-    { day: 23, weight: 2, matches: [{ title: 'Football Turf Session', venue: 'VK Multi Sports Turf', time: '6:00 PM', type: 'Match' }, { title: 'Box Cricket League', venue: 'Clash on turf', time: '8:30 PM', type: 'Match' }] },
-    { day: 24, weight: 0, matches: [] },
-    { day: 25, weight: 1, matches: [{ title: 'Badminton Morning Doubles', venue: 'Tlk turf for badminton', time: '9:00 AM', type: 'Match' }] },
-    { day: 26, weight: 2, matches: [{ title: 'Football Turf Session', venue: 'VK Multi Sports Turf', time: '6:00 PM', type: 'Match' }, { title: 'TT Singles Challenge', venue: 'A.s 360 Turf Academy', time: '7:30 PM', type: 'Match' }] },
-    { day: 27, weight: 3, matches: [{ title: 'Weekend Football Gold Cup', venue: 'Vanguard Sports Arena', time: '10:00 AM', type: 'Tournament' }, { title: 'Box Cricket T10 Match', venue: 'Clash on turf', time: '3:00 PM', type: 'Match' }, { title: 'Bowling Party Night', venue: 'Bowling in vr mall', time: '9:00 PM', type: 'Practice' }] },
-    { day: 28, weight: 0, matches: [] },
-    { day: 29, weight: 1, matches: [{ title: 'Badminton Doubles Club', venue: 'Tlk turf for badminton', time: '7:00 PM', type: 'Match' }] },
-    { day: 30, weight: 0, matches: [] }
-  ];
+  const juneActivity = Array.isArray(user?.juneActivity)
+    ? user.juneActivity
+    : Array.from({ length: 30 }, (_, i) => ({
+        day: i + 1,
+        weight: 0,
+        matches: []
+      }));
 
-  const totalMatches = juneActivity.reduce((acc, d) => acc + d.matches.length, 0);
-  const activeDaysCount = juneActivity.filter(d => d.weight > 0).length;
+  const totalMatches = juneActivity.reduce((acc, d) => acc + (Array.isArray(d?.matches) ? d.matches.length : 0), 0);
+  const activeDaysCount = juneActivity.filter(d => d && d.weight > 0).length;
 
   return (
     <div className="min-h-screen bg-transparent pt-24 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-left transition-colors duration-500">
       
-      {/* 1. COVER PHOTO & PROFILE MAIN SUMMARY */}
-      <div className="glass-card overflow-hidden border border-white/5 relative mb-12">
-        <div className="h-44 w-full relative overflow-hidden">
-          <img 
-            src={profile.coverImage} 
-            alt="Cover" 
-            className="w-full h-full object-cover brightness-70" 
-            style={{ 
-              transform: `scale(${user?.coverScale || 1}) translate(${user?.coverX || 0}%, ${user?.coverY || 0}%)`,
-              transformOrigin: 'center'
-            }}
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0c0c0c]/80 to-transparent" />
+      {/* 1. CENTERED WHATSAPP / INSTAGRAM STYLE HEADER (NO COVER PHOTO) */}
+      <div className="glass-card overflow-hidden border border-white/5 relative mb-10 p-8 text-center flex flex-col items-center justify-center space-y-4">
+        
+        {/* Centered Profile Picture with Quick Edit Camera Trigger */}
+        <div className="relative group cursor-pointer" onClick={() => avatarFileInputRef.current?.click()}>
+          <UserAvatar user={user || profile} className="w-32 h-32 text-4xl shadow-2xl border-4 border-indigo-500/50" />
+          
+          <button 
+            type="button"
+            onClick={(e) => { e.stopPropagation(); avatarFileInputRef.current?.click(); }}
+            className="absolute bottom-1 right-1 p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full border-2 border-[#0c0c0c] shadow-lg transition-transform hover:scale-110 cursor-pointer"
+            title="Upload Profile Picture"
+          >
+            <Camera className="w-4 h-4" />
+          </button>
         </div>
 
-        <div className="px-6 pb-6 relative z-10 flex flex-col md:flex-row md:items-end justify-between -mt-16 gap-6">
-          <div className="flex flex-col md:flex-row items-center md:items-end space-y-4 md:space-y-0 md:space-x-6">
-            <div className="w-28 h-28 rounded-full border-4 border-luxury-bg overflow-hidden flex-shrink-0 bg-neutral-900 shadow-2xl relative">
-              <img 
-                src={profile.avatar} 
-                alt={profile.name} 
-                className="w-full h-full object-cover" 
-                style={{ 
-                  transform: `scale(${user?.avatarScale || 1}) translate(${user?.avatarX || 0}%, ${user?.avatarY || 0}%)`,
-                  transformOrigin: 'center'
-                }}
-              />
-            </div>
-            
-            <div className="text-center md:text-left space-y-1.5">
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
-                <h1 className="text-2xl font-black font-display tracking-tight text-white">{profile.name}</h1>
-                <span className="p-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
-                  <Sparkles className="w-3.5 h-3.5" />
-                </span>
-                <span className={`inline-flex items-center text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
-                  role === 'owner'
-                    ? 'bg-violet-500/15 text-violet-400 border-violet-500/25'
-                    : 'bg-indigo-500/15 text-indigo-400 border-indigo-500/25'
-                }`}>
-                  {role === 'owner' ? '🏟️ Venue Owner' : '🏃 Player'}
-                </span>
-              </div>
-              <p className="text-xs text-neutral-400 font-light">{profile.title}</p>
-            </div>
+        {/* Hidden File Input for PFP upload */}
+        <input 
+          ref={avatarFileInputRef}
+          type="file" 
+          accept="image/*"
+          onChange={handleAvatarFileSelect}
+          className="hidden" 
+        />
+
+        {/* Centered Name, Player ID Badge, Role Tag & Bio */}
+        <div className="space-y-2 max-w-lg mx-auto">
+          <div className="flex items-center justify-center gap-2">
+            <h1 className="text-3xl font-black font-display tracking-tight text-white">{profile.name}</h1>
+            <span className={`inline-flex items-center text-[10px] font-extrabold uppercase px-3 py-1 rounded-full border ${
+              role === 'owner'
+                ? 'bg-violet-500/15 text-violet-400 border-violet-500/25'
+                : 'bg-indigo-500/15 text-indigo-400 border-indigo-500/25'
+            }`}>
+              {role === 'owner' ? '🏟️ Venue Owner' : '🏃 Player'}
+            </span>
           </div>
 
-          <div className="flex items-center justify-center space-x-3 self-center md:self-end">
-            <button 
-              onClick={() => setIsSettingsOpen(true)}
-              className="px-5 py-2.5 bg-white text-black font-bold text-xs uppercase tracking-widest rounded-full hover:bg-neutral-200 transition-colors"
+          {/* Unique Player ID Badge with 1-Click Copy */}
+          <div className="flex items-center justify-center">
+            <button
+              type="button"
+              onClick={handleCopyPlayerId}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-mono font-extrabold transition-all cursor-pointer group shadow-sm"
+              title="Click to copy Player ID"
             >
-              Edit Profile
+              <Hash className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{editPlayerId || initialPlayerId}</span>
+              {copiedId ? (
+                <Check className="w-3.5 h-3.5 text-emerald-400 ml-0.5" />
+              ) : (
+                <Copy className="w-3 h-3 text-neutral-400 group-hover:text-white ml-0.5 transition-colors" />
+              )}
             </button>
           </div>
+
+          <p className="text-sm text-neutral-400 font-light leading-relaxed">{profile.title}</p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 border-t border-white/5 divide-x divide-white/5 bg-white/[0.01]">
-          {profile.stats.map(stat => (
-            <div key={stat.name} className="py-5 text-center">
-              <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold">{stat.name}</p>
-              <p className="text-2xl font-black font-display text-white mt-1">{stat.value}</p>
-            </div>
-          ))}
+        {/* Action Buttons */}
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          {onOpenProfileSwitcher && (
+            <button
+              onClick={onOpenProfileSwitcher}
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs uppercase tracking-widest rounded-full transition-all flex items-center space-x-1.5 shadow-lg shadow-indigo-600/30 cursor-pointer"
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" />
+              <span>Switch Profile</span>
+            </button>
+          )}
+          <button
+            onClick={handleShareProfile}
+            className="px-5 py-2.5 bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 font-bold text-xs uppercase tracking-widest rounded-full transition-all flex items-center space-x-1.5 cursor-pointer shadow-md"
+            title="Share your Player ID & profile link"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            <span>Share Profile</span>
+          </button>
+          <button 
+            onClick={() => setIsSettingsOpen(true)}
+            className="px-5 py-2.5 bg-white text-black font-bold text-xs uppercase tracking-widest rounded-full hover:bg-neutral-200 transition-colors cursor-pointer"
+          >
+            Edit Profile
+          </button>
+          <button 
+            onClick={() => setShowDeleteConfirm(true)}
+            className="px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 text-rose-400 font-bold text-xs uppercase tracking-widest rounded-full transition-all flex items-center space-x-1.5 cursor-pointer"
+            title="Delete Account & Profile"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete Account</span>
+          </button>
         </div>
       </div>
 
-      {/* 2. GRID DETAILS */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        {/* LEFT COLUMN: Overview, Achievements, Activity Calendar */}
-        <div className="lg:col-span-8 space-y-8">
-          
-          {/* ACTIVITY HEATMAP CALENDAR */}
-          <div className="glass-card p-6 border border-white/5 space-y-6">
-            {/* Header */}
-            <div className="flex flex-wrap justify-between items-center gap-4 pb-4 border-b border-white/5">
-              <div>
-                <div className="flex items-center space-x-2">
-                  <Calendar className="w-4 h-4 text-indigo-400" />
-                  <span className="text-[10px] text-indigo-400 uppercase font-extrabold tracking-widest">Interactive Tracker</span>
-                </div>
-                <h3 className="font-display font-extrabold text-lg text-white uppercase tracking-wider mt-1">June 2026 Activity</h3>
-                <p className="text-[10px] text-neutral-500 mt-0.5">Click any day to view details of your sessions, matches, or tournaments.</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[10px] text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-full font-bold">
-                  Streak: 4 Days
-                </span>
-                <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full font-bold">
-                  {activeDaysCount} / 30 Active Days
-                </span>
-              </div>
+      {/* 2. STATS BAR */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        {profile.stats.map((stat, i) => (
+          <div key={i} className="glass-card p-5 border border-white/5 space-y-1 text-center">
+            <p className="text-[10px] text-neutral-400 uppercase tracking-widest font-extrabold">{stat.name}</p>
+            <p className="font-display font-black text-2xl text-white">{stat.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* 2.5 PLAYER REPUTATION & RELIABILITY SCORES CARD */}
+      <div className="glass-card p-6 border border-indigo-500/20 mb-10 space-y-5 bg-indigo-500/[0.02]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/10">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
+              <ShieldCheck className="w-6 h-6" />
             </div>
-
-            {/* Content: side-by-side calendar and day details */}
-            <div className="flex flex-col md:flex-row gap-8">
-              {/* Calendar Grid Section */}
-              <div className="flex-shrink-0 space-y-4">
-                {/* Day Headers */}
-                <div className="grid grid-cols-7 gap-2 text-center text-[10px] font-black uppercase text-neutral-500 select-none pb-1">
-                  <div>Mon</div>
-                  <div>Tue</div>
-                  <div>Wed</div>
-                  <div>Thu</div>
-                  <div>Fri</div>
-                  <div>Sat</div>
-                  <div>Sun</div>
-                </div>
-
-                {/* Heatmap Grid (June 2026 starts on Monday, so no offset) */}
-                <div className="grid grid-cols-7 gap-2 max-w-[280px]">
-                  {juneActivity.map((dayObj) => {
-                    const isSelected = selectedDay === dayObj.day;
-                    let opacityClass = 'bg-neutral-900 border border-white/5 hover:border-white/20';
-                    if (dayObj.weight === 1) opacityClass = 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20';
-                    if (dayObj.weight === 2) opacityClass = 'bg-indigo-500/30 border border-indigo-500/40 text-indigo-100 hover:bg-indigo-500/40';
-                    if (dayObj.weight === 3) opacityClass = 'bg-indigo-500 border border-transparent text-white shadow-[0_0_10px_rgba(99,102,241,0.2)] hover:bg-indigo-400';
-                    
-                    return (
-                      <button 
-                        key={dayObj.day} 
-                        type="button"
-                        onClick={() => setSelectedDay(dayObj.day)}
-                        className={`h-8 w-8 rounded-lg ${opacityClass} transition-all duration-200 flex items-center justify-center text-[10px] font-bold select-none cursor-pointer ${
-                          isSelected ? 'ring-2 ring-white scale-110 shadow-lg shadow-indigo-500/20' : ''
-                        } ${dayObj.weight === 0 ? 'text-neutral-500 hover:text-white' : ''}`}
-                        title={`Day ${dayObj.day}: ${dayObj.matches.length} Matches`}
-                      >
-                        {dayObj.day}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Legend */}
-                <div className="flex flex-wrap items-center gap-3 text-[9px] text-neutral-500 pt-2 select-none">
-                  <div className="flex items-center space-x-1">
-                    <span className="w-2.5 h-2.5 rounded bg-neutral-900 border border-white/5" />
-                    <span>0 Matches</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <span className="w-2.5 h-2.5 rounded bg-indigo-500/15 border border-indigo-500/30" />
-                    <span>1 Match</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <span className="w-2.5 h-2.5 rounded bg-indigo-500/40 border border-indigo-500/50" />
-                    <span>2 Matches</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <span className="w-2.5 h-2.5 rounded bg-indigo-500" />
-                    <span>3+ Matches</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Day Details Pane */}
-              <div className="flex-grow bg-white/[0.01] border border-white/5 rounded-2xl p-5 text-left flex flex-col justify-between min-h-[220px]">
-                <div>
-                  <div className="flex items-center justify-between pb-3 border-b border-white/5">
-                    <span className="text-[10px] font-extrabold uppercase text-neutral-400 tracking-wider font-display">
-                      June {selectedDay}, 2026 Details
-                    </span>
-                    <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
-                      (juneActivity.find(d => d.day === selectedDay)?.matches.length || 0) > 0
-                        ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
-                        : 'bg-neutral-800 border-white/10 text-neutral-500'
-                    }`}>
-                      {(juneActivity.find(d => d.day === selectedDay)?.matches.length || 0)} {(juneActivity.find(d => d.day === selectedDay)?.matches.length || 0) === 1 ? 'Session' : 'Sessions'}
-                    </span>
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    {(() => {
-                      const dayObj = juneActivity.find(d => d.day === selectedDay) || { matches: [] };
-                      if (dayObj.matches.length === 0) {
-                        return (
-                          <div className="py-8 flex flex-col items-center justify-center text-center">
-                            <span className="text-xl">🛌</span>
-                            <p className="text-xs text-neutral-500 font-light mt-2">Rest Day. No matches played on this date.</p>
-                          </div>
-                        );
-                      }
-                      return dayObj.matches.map((match, i) => (
-                        <div key={i} className="p-3 bg-white/[0.02] border border-white/5 rounded-xl flex items-center justify-between text-xs hover:bg-white/[0.04] transition-all">
-                          <div className="space-y-0.5 min-w-0 pr-2">
-                            <p className="font-bold text-white truncate">{match.title}</p>
-                            <p className="text-[10px] text-neutral-400 truncate">🏟️ {match.venue}</p>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/25 text-indigo-400 rounded-md">
-                              {match.time}
-                            </span>
-                            <p className="text-[8px] text-neutral-500 uppercase font-black mt-1 tracking-wider">{match.type}</p>
-                          </div>
-                        </div>
-                      ));
-                    })()}
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-white/5 flex items-center justify-between text-[10px] text-neutral-500">
-                  <span>Month-to-Date Total: <b>{totalMatches} Matches</b></span>
-                  <span>Active Days: <b>{activeDaysCount} Days</b></span>
-                </div>
-              </div>
+            <div>
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-400">Verified Match Passport</span>
+              <h3 className="font-display font-black text-white text-lg leading-tight">Player Reputation & Reliability Scores</h3>
             </div>
           </div>
+          <div className="flex items-center space-x-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-full text-emerald-400 text-xs font-bold self-start">
+            <Sparkles className="w-4 h-4" />
+            <span>S-Tier Verified Athlete (4.9★)</span>
+          </div>
+        </div>
 
-          {/* MATCH HISTORY LOGS */}
-          <div className="glass-card p-6 border border-white/5 space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* 1. Show-Up Score (Attended or No-Show) */}
+          <div className="bg-neutral-900/90 border border-indigo-500/20 rounded-2xl p-5 text-left space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                <Flame className="w-4 h-4 text-indigo-400" /> Match Show-Up Score
+              </span>
+              <span className="text-xs font-bold text-neutral-400">4.9★</span>
+            </div>
+            <div className="flex items-baseline space-x-2">
+              <span className="font-display font-black text-3xl text-white">96%</span>
+              <span className="text-[10px] font-extrabold text-indigo-400 bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
+                Showed Up 24/25 Matches
+              </span>
+            </div>
+            <div className="w-full bg-neutral-800 h-2 rounded-full overflow-hidden">
+              <div className="bg-gradient-to-r from-indigo-500 to-cyan-400 h-full rounded-full" style={{ width: '96%' }} />
+            </div>
+            <p className="text-[11px] text-neutral-400 font-light leading-snug">
+              Tracks whether the player actually shows up after committing to a match. 0 unexcused no-shows recorded.
+            </p>
+          </div>
+
+          {/* 2. On-Time Punctuality Score (On Time or Late) */}
+          <div className="bg-neutral-900/90 border border-emerald-500/20 rounded-2xl p-5 text-left space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-emerald-400" /> On-Time Punctuality Score
+              </span>
+              <span className="text-xs font-bold text-neutral-400">4.9★</span>
+            </div>
+            <div className="flex items-baseline space-x-2">
+              <span className="font-display font-black text-3xl text-white">98%</span>
+            </div>
+            <div className="w-full bg-neutral-800 h-2 rounded-full overflow-hidden">
+              <div className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full" style={{ width: '98%' }} />
+            </div>
+            <p className="text-[11px] text-neutral-400 font-light leading-snug">
+              Tracks whether the player arrives on time for match kickoff. 0 late arrivals recorded.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. MAIN CONTENT LAYOUT */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* LEFT COLUMN: Overview & Activity Calendar */}
+        <div className="lg:col-span-2 space-y-8">
+          
+          {/* Sports Interests */}
+          <div className="glass-card p-6 border border-white/5 space-y-4">
             <h3 className="font-display font-extrabold text-sm uppercase tracking-wider pb-3 border-b border-white/5">
-              Recent Matches
+              Sports Interests
             </h3>
-
-            <div className="space-y-4">
-              {profile.history.map(item => (
-                <div key={item.id} className="flex justify-between items-center p-3.5 bg-white/[0.01] border border-white/5 rounded-xl text-xs font-light">
-                  <div className="text-left space-y-1">
-                    <p className="font-bold text-white text-sm">{item.title}</p>
-                    <p className="text-neutral-500">{item.venue} • {item.date}</p>
-                  </div>
-                  <div className="text-right space-y-1">
-                    <span className={`inline-block px-2.5 py-0.5 rounded-full text-[9px] uppercase font-bold tracking-wider ${
-                      item.result.includes('Won') ? 'bg-white text-black' : 'bg-neutral-800 text-neutral-400'
-                    }`}>
-                      {item.result}
-                    </span>
-                    <p className="text-[10px] text-indigo-400 font-bold">{item.xp}</p>
-                  </div>
+            <div className="flex flex-wrap gap-2.5">
+              {profile.interests.map((item, i) => (
+                <div 
+                  key={i} 
+                  className="flex items-center space-x-2 px-3.5 py-2 bg-white/[0.03] border border-white/10 rounded-xl text-xs font-bold text-white"
+                >
+                  <span className="text-base">{item.icon}</span>
+                  <span>{item.sport}</span>
                 </div>
               ))}
             </div>
           </div>
 
-        </div>
+          {/* Monthly Activity Calendar */}
+          <div className="glass-card p-6 border border-white/5 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-white/5">
+              <div>
+                <h3 className="font-display font-extrabold text-sm uppercase tracking-wider">
+                  Activity Calendar
+                </h3>
+                <p className="text-[11px] text-neutral-400 font-light mt-0.5">{currentMonthName}</p>
+              </div>
 
-        {/* RIGHT COLUMN: Sports Interests & Unlocked Badges */}
-        <div className="lg:col-span-4 space-y-8">
-          
-          {/* Sports Interests */}
-          <div className="glass-card p-5 border border-white/5 space-y-5">
-            <h3 className="font-display font-extrabold text-sm uppercase tracking-wider pb-3 border-b border-white/5">
-              Sports Interests
-            </h3>
-            
-            <div className="space-y-4">
-              {profile.interests.map(interest => {
-                let badgeStyle = 'bg-rose-500/5 text-rose-400 border-rose-500/10';
-                if (interest.sport === 'Football') badgeStyle = 'bg-emerald-500/5 text-emerald-400 border-emerald-500/10';
-                if (interest.sport === 'Badminton') badgeStyle = 'bg-indigo-500/5 text-indigo-400 border-indigo-500/10';
+              <div className="flex items-center space-x-3 text-xs font-bold text-neutral-400">
+                <span className="flex items-center space-x-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                  <span>{activeDaysCount} Active Days</span>
+                </span>
+                <span>•</span>
+                <span>{totalMatches} Matches</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-7 gap-2">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                <div key={d} className="text-center text-[10px] font-extrabold uppercase text-neutral-500 py-1">
+                  {d}
+                </div>
+              ))}
+              {juneActivity.map((act) => {
+                const isToday = act.day === todayDayNum;
+                const isSelected = act.day === selectedDay;
+                const isActive = act.weight > 0;
+
                 return (
-                  <div key={interest.sport} className="flex justify-between items-center text-xs font-light">
-                    <div className="flex items-center space-x-2.5">
-                      <span className="text-2xl">{interest.icon}</span>
-                      <span className="font-bold text-white text-sm">{interest.sport}</span>
-                    </div>
-                    <span className={`text-[10px] uppercase font-extrabold px-3 py-1 rounded-full border ${badgeStyle}`}>
-                      {interest.level}
-                    </span>
-                  </div>
+                  <button
+                    key={act.day}
+                    onClick={() => setSelectedDay(act.day)}
+                    className={`h-11 rounded-xl flex flex-col items-center justify-center relative transition-all cursor-pointer border ${
+                      isSelected
+                        ? 'border-indigo-500 bg-indigo-500/20 text-white shadow-lg'
+                        : isToday
+                          ? 'border-white/30 bg-white/10 text-white'
+                          : isActive
+                            ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
+                            : 'border-white/5 bg-white/[0.01] text-neutral-500 hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">{act.day}</span>
+                    {isActive && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-0.5" />
+                    )}
+                  </button>
                 );
               })}
             </div>
           </div>
+        </div>
 
-          {/* Achievements section */}
-          <div className="glass-card p-5 border border-white/5 space-y-5">
+        {/* RIGHT COLUMN: Account Summary */}
+        <div className="space-y-8">
+          <div className="glass-card p-6 border border-white/5 space-y-4">
             <h3 className="font-display font-extrabold text-sm uppercase tracking-wider pb-3 border-b border-white/5">
-              Achievements
+              Account Summary
             </h3>
-            
-            <div className="space-y-4 text-xs font-light">
-              {profile.achievements.map(item => {
-                const isUnlocked = item.unlocked !== false;
-                return (
-                  <div key={item.id} className={`flex items-start space-x-3.5 p-3 rounded-2xl transition-all ${
-                    isUnlocked 
-                      ? 'bg-white/[0.02] border border-white/5' 
-                      : 'bg-black/40 border border-white/[0.02] opacity-60'
-                  }`}>
-                    {/* Icon container */}
-                    <div className="relative flex-shrink-0">
-                      <span className={`text-3xl p-1.5 bg-neutral-900 border border-white/5 rounded-xl block ${
-                        !isUnlocked ? 'filter grayscale opacity-40' : ''
-                      }`}>
-                        {item.icon}
-                      </span>
-                      {!isUnlocked && (
-                        <div className="absolute -bottom-1 -right-1 bg-neutral-800 border border-white/10 p-0.5 rounded-full text-white">
-                          <Lock className="w-2.5 h-2.5 text-neutral-400" />
-                        </div>
-                      )}
-                    </div>
 
-                    {/* Content container */}
-                    <div className="flex-grow text-left min-w-0">
-                      <div className="flex justify-between items-center gap-2">
-                        <h4 className={`font-bold text-sm ${isUnlocked ? 'text-white' : 'text-neutral-400'}`}>
-                          {item.title}
-                        </h4>
-                        {isUnlocked ? (
-                          <span className="text-[8px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded font-bold uppercase tracking-wider border border-emerald-500/15">
-                            Unlocked
-                          </span>
-                        ) : (
-                          <span className="text-[8px] text-neutral-500 font-bold uppercase tracking-wider">
-                            Locked
-                          </span>
-                        )}
-                      </div>
-                      
-                      <p className="text-neutral-400 text-[11px] font-light mt-0.5 leading-relaxed">
-                        {item.desc}
-                      </p>
-
-                      {/* Progress Bar (if locked and progress exists) */}
-                      {!isUnlocked && item.progress && (
-                        <div className="mt-2.5 space-y-1">
-                          <div className="flex justify-between text-[9px] text-neutral-500 font-bold uppercase tracking-wider">
-                            <span>Progress</span>
-                            <span>{item.progress.current} / {item.progress.total}</span>
-                          </div>
-                          <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-indigo-500 rounded-full" 
-                              style={{ width: `${(item.progress.current / item.progress.total) * 100}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {isUnlocked && item.date && (
-                        <p className="text-[9px] text-neutral-500 mt-1 font-medium">
-                          Unlocked: {item.date}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between items-center py-2 border-b border-white/5">
+                <span className="text-neutral-400 font-light">Account Type:</span>
+                <span className="font-bold text-white uppercase tracking-wider">{role === 'owner' ? 'Venue Owner' : 'Player'}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-white/5">
+                <span className="text-neutral-400 font-light">Email Address:</span>
+                <span className="font-bold text-neutral-300 truncate max-w-[160px]">{user?.email || 'N/A'}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-white/5">
+                <span className="text-neutral-400 font-light">Player ID:</span>
+                <span className="font-bold text-indigo-400 font-mono text-xs">{editPlayerId || initialPlayerId}</span>
+              </div>
             </div>
           </div>
 
         </div>
-
       </div>
 
-      {/* 3. PREMIUM SETTINGS MODAL WITH LIGHT/DARK THEME SELECTOR */}
+      {/* 4. WHATSAPP / INSTAGRAM STYLE EDIT PROFILE MODAL */}
       <AnimatePresence>
         {isSettingsOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* Backdrop */}
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 0.8 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsSettingsOpen(false)}
-              className="absolute inset-0 bg-black"
-            />
-
-            {/* Modal Body */}
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="relative glass-card w-full max-w-[420px] p-6 border border-white/10 shadow-2xl text-left z-10 overflow-y-auto max-h-[90vh]"
-            >
-              <button 
-                onClick={() => setIsSettingsOpen(false)}
-                className="absolute top-4 right-4 p-2 bg-neutral-900 border border-white/5 rounded-full hover:bg-neutral-800 text-neutral-400 hover:text-white transition-all cursor-pointer"
-              >
-                <X className="w-4.5 h-4.5" />
-              </button>
-
-              <div className="space-y-6">
-                <div className="space-y-1 pb-3 border-b border-white/5">
-                  <h3 className="font-display font-black text-base uppercase">Edit Profile</h3>
-                  <p className="text-[10px] text-neutral-500">Configure your display details, profile photo and cover photo</p>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.8 }} exit={{ opacity: 0 }}
+              onClick={() => setIsSettingsOpen(false)} className="absolute inset-0 bg-black/85 backdrop-blur-md" />
+            
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 15 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="relative glass-card border border-white/10 rounded-3xl p-6 max-w-md w-full z-10 text-left space-y-6 shadow-2xl">
+              
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <div>
+                  <h3 className="font-display font-extrabold text-white text-lg">Edit Profile</h3>
+                  <p className="text-xs text-neutral-400 mt-0.5">Edit picture, name, and bio</p>
                 </div>
-
-                {/* Profile Edit Inputs */}
-                <div className="space-y-4 pb-4 border-b border-white/5">
-                  <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Profile Details</label>
-                  
-                  <div className="space-y-4 text-xs">
-                    <div className="space-y-1.5 text-left">
-                      <label className="text-[9px] text-neutral-500 uppercase tracking-wider font-bold">Display Name</label>
-                      <input 
-                        type="text" 
-                        value={editName}
-                        onChange={e => setEditName(e.target.value)}
-                        placeholder="Your name"
-                        className="w-full bg-[#0d0d0d] border border-white/5 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-white/20"
-                      />
-                    </div>
-                    
-                    <div className="space-y-1.5 text-left">
-                      <label className="text-[9px] text-neutral-500 uppercase tracking-wider font-bold">Title / Status</label>
-                      <input 
-                        type="text" 
-                        value={editTitle}
-                        onChange={e => setEditTitle(e.target.value)}
-                        placeholder="e.g. Elite Athlete"
-                        className="w-full bg-[#0d0d0d] border border-white/5 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-white/20"
-                      />
-                    </div>
-
-                    {/* Spotify-style Avatar Editor */}
-                    <div className="space-y-3">
-                      <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-bold">Profile Photo (Drag to Align)</label>
-                      
-                      {/* Interactive Circular Viewport */}
-                      <div 
-                        onMouseDown={onAvatarMouseDown}
-                        onMouseMove={onAvatarMouseMove}
-                        onMouseUp={handleAvatarEnd}
-                        onMouseLeave={handleAvatarEnd}
-                        onTouchStart={onAvatarTouchStart}
-                        onTouchMove={onAvatarTouchMove}
-                        onTouchEnd={handleAvatarEnd}
-                        className="w-36 h-36 rounded-full overflow-hidden border border-white/20 bg-neutral-900 flex-shrink-0 relative mx-auto cursor-move select-none shadow-[0_0_20px_rgba(0,0,0,0.6)] group"
-                      >
-                        {editAvatar ? (
-                          <img 
-                            src={editAvatar} 
-                            alt="Avatar Preview" 
-                            className="w-full h-full object-cover pointer-events-none" 
-                            style={{ 
-                              transform: `scale(${editAvatarScale}) translate(${editAvatarX}%, ${editAvatarY}%)`,
-                              transformOrigin: 'center'
-                            }}
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-neutral-800 flex items-center justify-center text-xs text-neutral-500">No Image</div>
-                        )}
-                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
-                          <span className="text-[10px] font-bold text-white uppercase tracking-wider bg-black/60 px-2.5 py-1 rounded-full">Drag to reposition</span>
-                         </div>
-                      </div>
-
-                      {/* File uploader & Zoom slider */}
-                      <div className="space-y-2">
-                        <div className="flex gap-2">
-                          <label className="w-full flex items-center justify-center border border-dashed border-white/10 hover:border-white/20 bg-white/[0.02] hover:bg-white/[0.04] py-2 px-3 rounded-xl cursor-pointer transition-colors text-neutral-400 hover:text-white text-[11px] font-bold">
-                            <span>Upload Custom Photo</span>
-                            <input 
-                              type="file" 
-                              accept="image/*"
-                              onChange={handleAvatarFileChange}
-                              className="hidden" 
-                            />
-                          </label>
-                          <button 
-                            type="button" 
-                            onClick={() => { setEditAvatarScale(1); setEditAvatarX(0); setEditAvatarY(0); }} 
-                            className="px-3 border border-white/10 hover:border-white/25 rounded-xl text-[10px] text-neutral-400 hover:text-white font-bold transition-all"
-                          >
-                            Reset
-                          </button>
-                        </div>
-
-                        <div className="space-y-1 bg-white/[0.01] border border-white/5 rounded-xl p-2.5">
-                          <div className="flex justify-between text-[9px] text-neutral-500 uppercase tracking-wider font-bold">
-                            <span>Zoom Size</span>
-                            <span>{editAvatarScale.toFixed(2)}x</span>
-                          </div>
-                          <input 
-                            type="range" min="1" max="4" step="0.01" value={editAvatarScale}
-                            onChange={e => setEditAvatarScale(parseFloat(e.target.value))}
-                            className="w-full accent-indigo-500 bg-neutral-800 rounded-lg cursor-pointer h-1"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Avatar Presets */}
-                    <div className="space-y-1.5 text-left">
-                      <label className="text-[9px] text-neutral-500 uppercase tracking-wider font-bold">Choose Preset Avatar</label>
-                      <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                        {PRESET_AVATARS.map((url, i) => (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => setEditAvatar(url)}
-                            className={`w-9 h-9 rounded-full overflow-hidden border-2 flex-shrink-0 transition-all ${
-                              editAvatar === url ? 'border-indigo-500 scale-105' : 'border-transparent hover:border-white/20'
-                            }`}
-                          >
-                            <img src={url} alt="" className="w-full h-full object-cover" />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Spotify-style Cover Editor */}
-                    <div className="space-y-3 mt-4">
-                      <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-bold">Cover Photo (Drag to Align)</label>
-                      
-                      {/* Interactive Horizontal Rectangular Viewport */}
-                      <div 
-                        onMouseDown={onCoverMouseDown}
-                        onMouseMove={onCoverMouseMove}
-                        onMouseUp={handleCoverEnd}
-                        onMouseLeave={handleCoverEnd}
-                        onTouchStart={onCoverTouchStart}
-                        onTouchMove={onCoverTouchMove}
-                        onTouchEnd={handleCoverEnd}
-                        className="w-full h-24 rounded-xl overflow-hidden border border-white/20 bg-neutral-900 relative cursor-move select-none shadow-[0_0_20px_rgba(0,0,0,0.6)] group"
-                      >
-                        {editCoverImage ? (
-                          <img 
-                            src={editCoverImage} 
-                            alt="Cover Preview" 
-                            className="w-full h-full object-cover pointer-events-none" 
-                            style={{ 
-                              transform: `scale(${editCoverScale}) translate(${editCoverX}%, ${editCoverY}%)`,
-                              transformOrigin: 'center'
-                            }}
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-neutral-800 flex items-center justify-center text-xs text-neutral-500">No Image</div>
-                        )}
-                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
-                          <span className="text-[10px] font-bold text-white uppercase tracking-wider bg-black/60 px-2.5 py-1 rounded-full">Drag to reposition</span>
-                        </div>
-                      </div>
-
-                      {/* File uploader & Zoom slider */}
-                      <div className="space-y-2">
-                        <div className="flex gap-2">
-                          <label className="w-full flex items-center justify-center border border-dashed border-white/10 hover:border-white/20 bg-white/[0.02] hover:bg-white/[0.04] py-2 px-3 rounded-xl cursor-pointer transition-colors text-neutral-400 hover:text-white text-[11px] font-bold">
-                            <span>Upload Custom Cover</span>
-                            <input 
-                              type="file" 
-                              accept="image/*"
-                              onChange={handleCoverFileChange}
-                              className="hidden" 
-                            />
-                          </label>
-                          <button 
-                            type="button" 
-                            onClick={() => { setEditCoverScale(1); setEditCoverX(0); setEditCoverY(0); }} 
-                            className="px-3 border border-white/10 hover:border-white/25 rounded-xl text-[10px] text-neutral-400 hover:text-white font-bold transition-all"
-                          >
-                            Reset
-                          </button>
-                        </div>
-
-                        <div className="space-y-1 bg-white/[0.01] border border-white/5 rounded-xl p-2.5">
-                          <div className="flex justify-between text-[9px] text-neutral-500 uppercase tracking-wider font-bold">
-                            <span>Zoom Size</span>
-                            <span>{editCoverScale.toFixed(2)}x</span>
-                          </div>
-                          <input 
-                            type="range" min="1" max="4" step="0.01" value={editCoverScale}
-                            onChange={e => setEditCoverScale(parseFloat(e.target.value))}
-                            className="w-full accent-indigo-500 bg-neutral-800 rounded-lg cursor-pointer h-1"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Cover Presets */}
-                    <div className="space-y-1.5 text-left">
-                      <label className="text-[9px] text-neutral-500 uppercase tracking-wider font-bold">Choose Preset Cover</label>
-                      <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                        {PRESET_COVERS.map((url, i) => (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => setEditCoverImage(url)}
-                            className={`w-14 h-9 rounded-lg overflow-hidden border-2 flex-shrink-0 transition-all ${
-                              editCoverImage === url ? 'border-indigo-500 scale-105' : 'border-transparent hover:border-white/20'
-                            }`}
-                          >
-                            <img src={url} alt="" className="w-full h-full object-cover" />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Additional Settings */}
-                <div className="space-y-4">
-                  <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Preferences</label>
-                  
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between items-center p-3 bg-white/[0.01] border border-white/5 rounded-xl">
-                      <div className="flex items-center space-x-2.5">
-                        <Lock className="w-4 h-4 text-neutral-500" />
-                        <span className="text-white font-medium">Privacy Lock</span>
-                      </div>
-                      <span className="text-[9px] uppercase font-bold text-neutral-500">Enabled</span>
-                    </div>
-
-                    <div className="flex justify-between items-center p-3 bg-white/[0.01] border border-white/5 rounded-xl">
-                      <div className="flex items-center space-x-2.5">
-                        <Volume2 className="w-4 h-4 text-neutral-500" />
-                        <span className="text-white font-medium">Sound FX / Alerts</span>
-                      </div>
-                      <span className="text-[9px] uppercase font-bold text-neutral-500">Disabled</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Confirmation Footer */}
-                <button
-                  onClick={() => {
-                    if (onUpdateUser) {
-                      onUpdateUser({
-                        name: editName,
-                        title: editTitle,
-                        avatar: editAvatar,
-                        avatarScale: editAvatarScale,
-                        avatarX: editAvatarX,
-                        avatarY: editAvatarY,
-                        coverImage: editCoverImage,
-                        coverScale: editCoverScale,
-                        coverX: editCoverX,
-                        coverY: editCoverY
-                      });
-                    }
-                    setIsSettingsOpen(false);
-                  }}
-                  className="w-full py-3.5 bg-white text-black font-extrabold text-xs uppercase tracking-widest rounded-full hover:bg-neutral-200 transition-colors text-center"
-                >
-                  Save & Apply
+                <button onClick={() => setIsSettingsOpen(false)} className="p-2 rounded-full bg-white/5 text-neutral-400 hover:text-white cursor-pointer">
+                  <X className="w-4 h-4" />
                 </button>
+              </div>
 
+              <form onSubmit={handleSaveProfile} className="space-y-5">
+                
+                {/* 1. UPLOAD & CROP PICTURE */}
+                <div className="flex flex-col items-center justify-center space-y-3">
+                  <div 
+                    className="relative group cursor-pointer" 
+                    onClick={() => avatarFileInputRef.current?.click()}
+                  >
+                    <div className="w-28 h-28 rounded-full border-2 border-indigo-500/80 overflow-hidden bg-neutral-900 shadow-xl relative">
+                      {editAvatar ? (
+                        <img src={editAvatar} alt="Profile" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-neutral-500 font-bold text-3xl">
+                          {editName?.[0] || 'U'}
+                        </div>
+                      )}
+                    </div>
+                    <div className="absolute inset-0 bg-black/50 rounded-full flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Camera className="w-6 h-6 text-white" />
+                      <span className="text-[9px] text-white font-bold uppercase mt-1">Change</span>
+                    </div>
+                  </div>
+
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      if (editAvatar) {
+                        setRawCropImage(editAvatar);
+                        setShowCropModal(true);
+                      } else {
+                        avatarFileInputRef.current?.click();
+                      }
+                    }}
+                    className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
+                  >
+                    {editAvatar ? 'Crop & Adjust Picture' : 'Upload Profile Picture'}
+                  </button>
+                </div>
+
+                {/* 2. EDIT NAME */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Name</label>
+                  <input 
+                    type="text" 
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    placeholder="Enter your name"
+                    required
+                    className="w-full bg-[#0d0d0d] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-indigo-500/60"
+                  />
+                </div>
+
+                {/* 2.5 EDIT PLAYER ID / HANDLE */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Unique Player ID (@handle)</label>
+                  <input 
+                    type="text" 
+                    value={editPlayerId}
+                    onChange={e => {
+                      let val = e.target.value;
+                      if (val.trim() && !val.startsWith('@')) val = '@' + val;
+                      setEditPlayerId(val);
+                    }}
+                    placeholder="@danish98"
+                    required
+                    className="w-full bg-[#0d0d0d] border border-white/10 rounded-xl px-4 py-3 text-sm font-mono text-indigo-400 placeholder-neutral-600 focus:outline-none focus:border-indigo-500/60"
+                  />
+                  <p className="text-[10px] text-neutral-500">Other players can search & connect with you using this ID.</p>
+                </div>
+
+                {/* 3. EDIT BIO */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Bio</label>
+                  <textarea 
+                    rows={3}
+                    value={editTitle}
+                    onChange={e => setEditTitle(e.target.value)}
+                    placeholder="Write a brief bio about yourself..."
+                    className="w-full bg-[#0d0d0d] border border-white/10 rounded-xl p-3.5 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-indigo-500/60 resize-none"
+                  />
+                </div>
+
+                {/* ACTION BUTTONS */}
+                <div className="flex items-center justify-end space-x-3 pt-3 border-t border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="px-5 py-2.5 rounded-full text-xs font-bold text-neutral-400 hover:text-white cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="px-6 py-2.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-indigo-600/30 flex items-center space-x-2"
+                  >
+                    {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    <span>Save Changes</span>
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 5. INTERACTIVE CROP MODAL FOR PFP */}
+      <AnimatePresence>
+        {showCropModal && rawCropImage && (
+          <PfpCropModal
+            imageSrc={rawCropImage}
+            onClose={() => setShowCropModal(false)}
+            onConfirm={async (croppedUrl) => {
+              setEditAvatar(croppedUrl);
+              setShowCropModal(false);
+
+              // Immediately update profile avatar in database and app state
+              const targetId = user?.id || user?.firebase_uid || user?.email || user?.username;
+              if (targetId) {
+                await apiUpdateProfile(targetId, {
+                  avatar_url: croppedUrl,
+                  avatar: croppedUrl
+                });
+              }
+
+              if (onUpdateUser) {
+                onUpdateUser({
+                  avatar_url: croppedUrl,
+                  avatar: croppedUrl
+                });
+              }
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* 6. DELETE ACCOUNT CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.8 }} exit={{ opacity: 0 }}
+              onClick={() => setShowDeleteConfirm(false)} className="absolute inset-0 bg-black/85 backdrop-blur-md" />
+            
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 15 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="relative glass-card border border-rose-500/30 rounded-3xl p-6 max-w-md w-full z-10 text-left space-y-4 shadow-2xl">
+              
+              <div className="flex items-center space-x-3 pb-3 border-b border-white/10">
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-full text-rose-400">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-display font-extrabold text-white text-base">Delete Account & Profile?</h3>
+                  <p className="text-xs text-neutral-400 mt-0.5">This action is permanent and cannot be undone</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-neutral-400 font-light leading-relaxed">
+                Are you sure you want to delete your account? Your bookings, activity logs, and username will be permanently deleted.
+              </p>
+
+              {deleteError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end space-x-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingAccount}
+                  onClick={() => { setShowDeleteConfirm(false); setDeleteError(''); }}
+                  className="px-5 py-2.5 rounded-full text-xs font-bold text-neutral-400 hover:text-white cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingAccount}
+                  onClick={async () => {
+                    setIsDeletingAccount(true);
+                    setDeleteError('');
+                    try {
+                      const res = await apiDeleteAccount(user);
+                      if (res && res.error) {
+                        setDeleteError(res.error);
+                        setIsDeletingAccount(false);
+                        return;
+                      }
+                      setShowDeleteConfirm(false);
+                      setIsDeletingAccount(false);
+                      if (onLogout) onLogout();
+                    } catch (err) {
+                      setDeleteError(err.message || 'Failed to delete account. Please try again.');
+                      setIsDeletingAccount(false);
+                    }
+                  }}
+                  className="px-6 py-2.5 rounded-full bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-rose-600/30 flex items-center space-x-2"
+                >
+                  {isDeletingAccount ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Deleting Account...</span>
+                    </>
+                  ) : (
+                    <span>Delete Account Permanently</span>
+                  )}
+                </button>
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* 7. FLOATING TOAST NOTIFICATION */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            className="fixed bottom-6 right-6 z-50 bg-indigo-600 text-white px-5 py-3 rounded-2xl shadow-2xl border border-indigo-400/30 text-xs font-bold flex items-center space-x-2"
+          >
+            <Check className="w-4 h-4 text-emerald-300" />
+            <span>{toastMessage}</span>
+          </motion.div>
         )}
       </AnimatePresence>
 

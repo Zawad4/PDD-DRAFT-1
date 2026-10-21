@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Trophy, Plus, Users, Calendar, IndianRupee, Clock, ChevronRight,
   Flame, Shield, Star, MapPin, Filter, CheckCircle, X, Edit3, Trash2,
-  ArrowRight, Crown, Medal, Swords, AlertCircle, Phone, FileText, Target
+  ArrowRight, Crown, Medal, Swords, AlertCircle, Phone, FileText, Target,
+  ShieldCheck, QrCode, CreditCard, Smartphone, Building2
 } from 'lucide-react';
 import SportIcon from '../components/SportIcon';
 
@@ -16,8 +17,8 @@ const TOURNAMENTS = [
     title: 'Vanguard Weekend Football Gold Cup',
     sport: 'Football',
     image: '/trophy.png',
-    prizePool: '₹2,00,000',
-    prizeRaw: 200000,
+    prizePool: '₹5,000',
+    prizeRaw: 5000,
     entryFee: '₹249',
     date: 'June 14–15, 2026',
     venue: 'Vanguard Sports Arena, Chennai',
@@ -34,11 +35,11 @@ const TOURNAMENTS = [
     title: 'Championship Table Tennis Open',
     sport: 'Table Tennis',
     image: 'https://images.unsplash.com/photo-1511067007398-7e4b90cfa4bc?q=80&w=800',
-    prizePool: '₹83,000',
-    prizeRaw: 83000,
+    prizePool: '₹2,500',
+    prizeRaw: 2500,
     entryFee: '₹149',
     date: 'June 21, 2026',
-    venue: 'Elite Courts, Bangalore',
+    venue: 'Elite Courts, Chennai',
     slots: 32,
     filled: 28,
     status: 'Open',
@@ -52,11 +53,11 @@ const TOURNAMENTS = [
     title: 'Smash Club Badminton Pro Series',
     sport: 'Badminton',
     image: '/smash_club_badminton.jpg',
-    prizePool: '₹1,25,000',
-    prizeRaw: 125000,
+    prizePool: '₹4,000',
+    prizeRaw: 4000,
     entryFee: '₹199',
     date: 'July 5–6, 2026',
-    venue: 'Smash Club, Mumbai',
+    venue: 'Smash Club, Chennai',
     slots: 24,
     filled: 10,
     status: 'Open',
@@ -70,11 +71,11 @@ const TOURNAMENTS = [
     title: 'HyperBowl League Night Championship',
     sport: 'Bowling',
     image: '/bowling.jpg',
-    prizePool: '₹50,000',
-    prizeRaw: 50000,
+    prizePool: '₹3,000',
+    prizeRaw: 3000,
     entryFee: '₹99',
     date: 'June 28, 2026',
-    venue: 'Apex Bowling & Games, Delhi',
+    venue: 'Apex Bowling & Games, Chennai',
     slots: 20,
     filled: 20,
     status: 'Full',
@@ -92,9 +93,10 @@ const MY_TOURNAMENTS = [
     title: 'Vanguard Summer Football Cup',
     sport: 'Football',
     image: '/trophy.png',
-    prizePool: '₹1,50,000',
+    prizePool: '₹5,000',
     entryFee: '₹299',
     date: 'July 12–13, 2026',
+    venue: 'Vanguard Sports Arena, Chennai',
     slots: 16,
     filled: 7,
     status: 'Draft',
@@ -121,75 +123,456 @@ const SPORT_COLORS = {
   Cricket:       { color: 'amber' },
 };
 
-/* ─── Payment Modal ──────────────────────────────────── */
-function PaymentModal({ tournament, onClose, onSuccess }) {
-  const [step, setStep] = useState('confirm'); // confirm | processing | success
+/* ─── Tournament Registration & Verification Modal ────────────────────── */
+function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
+  const [step, setStep] = useState('form'); // 'form' | 'verify' | 'payment' | 'processing' | 'success'
 
-  const handlePay = () => {
+  // Prefill user details if available
+  const [formData, setFormData] = useState({
+    teamName: user?.name ? `${user.name}'s Squad` : '',
+    captainName: user?.name || '',
+    phone: user?.phone || '',
+    email: user?.email || '',
+    category: 'Open Division',
+    roster: user?.name ? `${user.name} (Captain)` : '',
+    acceptRules: false,
+  });
+
+  const [paymentMethod, setPaymentMethod] = useState('upi'); // 'upi' | 'card' | 'netbanking'
+  const [upiId, setUpiId] = useState('player@upi');
+  const [cardNumber, setCardNumber] = useState('4111 •••• •••• 9842');
+  const [ticketPassId, setTicketPassId] = useState('');
+  const [errors, setErrors] = useState({});
+
+  const numericFee = parseInt(tournament.entryFee.replace(/[^0-9]/g, '')) || 249;
+  const gst = Math.round(numericFee * 0.18);
+  const totalAmount = numericFee + gst;
+
+  const handleValidateForm = (e) => {
+    e.preventDefault();
+    const errs = {};
+    if (!formData.teamName.trim()) errs.teamName = 'Team name is required';
+    if (!formData.captainName.trim()) errs.captainName = 'Captain name is required';
+    if (!formData.phone.trim()) errs.phone = 'Phone number is required';
+    if (!formData.email.trim()) errs.email = 'Email address is required';
+    if (!formData.acceptRules) errs.acceptRules = 'You must accept regulations & fair play policy';
+
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      return;
+    }
+    setErrors({});
+    setStep('verify');
+  };
+
+  const handleProceedToPayment = () => {
+    setStep('payment');
+  };
+
+  const handlePayNow = () => {
     setStep('processing');
-    setTimeout(() => setStep('success'), 2000);
-    setTimeout(() => { onSuccess(tournament.id); onClose(); }, 3200);
+    const passId = `TRN-${Math.floor(100000 + Math.random() * 900000)}`;
+    setTicketPassId(passId);
+
+    setTimeout(() => {
+      setStep('success');
+      onSuccess(tournament.id);
+    }, 2000);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto pt-10 pb-10">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.7 }} exit={{ opacity: 0 }}
-        onClick={onClose} className="absolute inset-0 bg-black" />
-      <motion.div initial={{ opacity: 0, scale: 0.94, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.94 }}
-        className="relative glass-card w-full max-w-[420px] p-7 border border-white/10 shadow-2xl z-10 text-left">
-
-        <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-neutral-400 hover:text-white transition-all">
+        onClick={onClose} className="absolute inset-0 bg-black/80 backdrop-blur-md" />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 15 }}
+        className="relative glass-card w-full max-w-[540px] p-6 sm:p-8 border border-white/10 shadow-2xl z-10 text-left my-auto rounded-3xl"
+      >
+        <button onClick={onClose} className="absolute top-5 right-5 p-2 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-neutral-400 hover:text-white transition-all">
           <X className="w-4 h-4" />
         </button>
 
-        {step === 'confirm' && (
-          <div className="space-y-5">
-            <div>
-              <p className="text-[10px] text-indigo-400 uppercase font-extrabold tracking-widest mb-1">Tournament Registration</p>
-              <h3 className="font-display font-black text-white text-lg leading-tight">{tournament.title}</h3>
-              <p className="text-xs text-neutral-400 mt-1">{tournament.date} • {tournament.venue}</p>
+        {/* Step Header Indicator */}
+        <div className="mb-6">
+          <div className="flex items-center space-x-2 text-xs font-bold text-indigo-400 uppercase tracking-widest mb-2">
+            <Trophy className="w-4 h-4 text-amber-400" />
+            <span>Tournament Registration</span>
+          </div>
+          <h3 className="font-display font-black text-white text-xl leading-tight">{tournament.title}</h3>
+          <p className="text-xs text-neutral-400 mt-1 flex items-center gap-2">
+            <span>{tournament.date}</span>
+            <span>•</span>
+            <span className="text-indigo-300">{tournament.venue}</span>
+          </p>
+
+          {/* Progress Bar Steps */}
+          <div className="grid grid-cols-4 gap-1.5 mt-5">
+            {[
+              { id: 'form', label: '1. Details' },
+              { id: 'verify', label: '2. Verify' },
+              { id: 'payment', label: '3. Prepaid Pay' },
+              { id: 'success', label: '4. Pass' },
+            ].map((s) => {
+              const stepOrder = ['form', 'verify', 'payment', 'processing', 'success'];
+              const currentIdx = stepOrder.indexOf(step === 'processing' ? 'payment' : step);
+              const thisIdx = stepOrder.indexOf(s.id);
+              const isActive = s.id === (step === 'processing' ? 'payment' : step);
+              const isDone = thisIdx < currentIdx;
+
+              return (
+                <div key={s.id} className="flex flex-col gap-1">
+                  <div className={`h-1.5 rounded-full transition-all duration-300 ${
+                    isActive ? 'bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]' : isDone ? 'bg-emerald-500' : 'bg-white/10'
+                  }`} />
+                  <span className={`text-[10px] font-bold text-center ${
+                    isActive ? 'text-indigo-400' : isDone ? 'text-emerald-400' : 'text-neutral-500'
+                  }`}>{s.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── STEP 1: REGISTRATION FORM ───────────────────── */}
+        {step === 'form' && (
+          <form onSubmit={handleValidateForm} className="space-y-4">
+            <div className="bg-indigo-500/5 border border-indigo-500/15 rounded-2xl p-4 mb-2">
+              <p className="text-xs text-neutral-300 flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                <span>Fill in your squad/player details accurately. Details will be verified before match allocation.</span>
+              </p>
             </div>
 
-            <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 space-y-2.5 text-sm">
-              <div className="flex justify-between"><span className="text-neutral-400">Entry Fee</span><span className="text-white font-bold">{tournament.entryFee}</span></div>
-              <div className="flex justify-between"><span className="text-neutral-400">GST (18%)</span><span className="text-white font-bold">₹{Math.round(parseInt(tournament.entryFee.replace(/[^0-9]/g,'')) * 0.18)}</span></div>
-              <div className="h-px bg-white/5" />
-              <div className="flex justify-between"><span className="text-white font-bold">Total</span>
-                <span className="text-indigo-400 font-black text-base">
-                  ₹{Math.round(parseInt(tournament.entryFee.replace(/[^0-9]/g,'')) * 1.18)}
-                </span>
+            <div>
+              <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-extrabold mb-1 block">Team / Player Name *</label>
+              <input
+                type="text"
+                value={formData.teamName}
+                onChange={e => setFormData({ ...formData, teamName: e.target.value })}
+                placeholder="e.g. Phoenix Strikers FC"
+                className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+              />
+              {errors.teamName && <p className="text-rose-400 text-[11px] mt-1">{errors.teamName}</p>}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-extrabold mb-1 block">Captain Name *</label>
+                <input
+                  type="text"
+                  value={formData.captainName}
+                  onChange={e => setFormData({ ...formData, captainName: e.target.value })}
+                  placeholder="Full Name"
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+                {errors.captainName && <p className="text-rose-400 text-[11px] mt-1">{errors.captainName}</p>}
+              </div>
+
+              <div>
+                <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-extrabold mb-1 block">Division / Category</label>
+                <select
+                  value={formData.category}
+                  onChange={e => setFormData({ ...formData, category: e.target.value })}
+                  className="w-full bg-neutral-900 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="Open Division">Open Division</option>
+                  <option value="Amateur Level">Amateur Level</option>
+                  <option value="Semi-Pro / Elite">Semi-Pro / Elite</option>
+                  <option value="Under-21 Youth">Under-21 Youth</option>
+                </select>
               </div>
             </div>
 
-            <div className="flex items-start space-x-2.5 text-xs text-neutral-400 bg-indigo-500/5 border border-indigo-500/15 rounded-xl p-3">
-              <Shield className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
-              <p>Prepaid registration guarantees your slot. Refundable up to 48 hours before event.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-extrabold mb-1 block">Phone Number *</label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={e => setFormData({ ...formData, phone: e.target.value })}
+                  placeholder="+91 9876543210"
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+                {errors.phone && <p className="text-rose-400 text-[11px] mt-1">{errors.phone}</p>}
+              </div>
+
+              <div>
+                <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-extrabold mb-1 block">Email Address *</label>
+                <input
+                  type="email"
+                  value={formData.email}
+                  onChange={e => setFormData({ ...formData, email: e.target.value })}
+                  placeholder="captain@example.com"
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+                {errors.email && <p className="text-rose-400 text-[11px] mt-1">{errors.email}</p>}
+              </div>
             </div>
 
-            <button onClick={handlePay}
-              className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs uppercase tracking-widest rounded-full transition-colors flex items-center justify-center space-x-2">
-              <IndianRupee className="w-3.5 h-3.5" />
-              <span>Pay & Register</span>
+            <div>
+              <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-extrabold mb-1 block">Squad Roster / Player Names</label>
+              <textarea
+                rows={2}
+                value={formData.roster}
+                onChange={e => setFormData({ ...formData, roster: e.target.value })}
+                placeholder="List players (e.g. Rahul S, Danish K, Amit P, Vignesh M)"
+                className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="pt-2">
+              <label className="flex items-start space-x-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.acceptRules}
+                  onChange={e => setFormData({ ...formData, acceptRules: e.target.checked })}
+                  className="mt-0.5 rounded border-white/20 bg-neutral-800 text-indigo-600 focus:ring-0"
+                />
+                <span className="text-xs text-neutral-300 leading-tight">
+                  I agree to tournament regulations, match reporting times, and fair play code of conduct.
+                </span>
+              </label>
+              {errors.acceptRules && <p className="text-rose-400 text-[11px] mt-1">{errors.acceptRules}</p>}
+            </div>
+
+            <button type="submit"
+              className="w-full py-3.5 mt-4 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs uppercase tracking-widest rounded-full transition-colors flex items-center justify-center space-x-2 shadow-[0_0_20px_rgba(99,102,241,0.3)]">
+              <span>Verify Registration Details</span>
+              <ArrowRight className="w-4 h-4" />
             </button>
-          </div>
+          </form>
         )}
 
-        {step === 'processing' && (
-          <div className="flex flex-col items-center py-8 space-y-4">
-            <div className="w-12 h-12 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-white font-bold text-sm">Processing Payment...</p>
-            <p className="text-neutral-500 text-xs">Securing your tournament slot</p>
-          </div>
-        )}
+        {/* ── STEP 2: VERIFICATION SUMMARY ───────────────────── */}
+        {step === 'verify' && (
+          <div className="space-y-5">
+            <div className="bg-neutral-900/80 border border-white/10 rounded-2xl p-5 space-y-4">
+              <div className="flex justify-between items-center pb-3 border-b border-white/10">
+                <span className="text-xs text-neutral-400 uppercase tracking-wider font-extrabold">Verification Summary</span>
+                <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full font-bold">
+                  {formData.category}
+                </span>
+              </div>
 
-        {step === 'success' && (
-          <div className="flex flex-col items-center py-8 space-y-4">
-            <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-              <CheckCircle className="w-7 h-7 text-emerald-400" />
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-neutral-500 block text-[10px] uppercase font-bold">Team Name</span>
+                  <span className="text-white font-bold text-sm">{formData.teamName}</span>
+                </div>
+                <div>
+                  <span className="text-neutral-500 block text-[10px] uppercase font-bold">Captain Name</span>
+                  <span className="text-white font-bold text-sm">{formData.captainName}</span>
+                </div>
+                <div>
+                  <span className="text-neutral-500 block text-[10px] uppercase font-bold">Contact Phone</span>
+                  <span className="text-neutral-300 font-medium">{formData.phone}</span>
+                </div>
+                <div>
+                  <span className="text-neutral-500 block text-[10px] uppercase font-bold">Contact Email</span>
+                  <span className="text-neutral-300 font-medium truncate block">{formData.email}</span>
+                </div>
+              </div>
+
+              {formData.roster && (
+                <div className="pt-2 border-t border-white/5 text-xs">
+                  <span className="text-neutral-500 block text-[10px] uppercase font-bold mb-1">Squad Roster</span>
+                  <p className="text-neutral-300 bg-white/[0.02] p-2.5 rounded-xl border border-white/5">{formData.roster}</p>
+                </div>
+              )}
+
+              {/* Fee breakdown */}
+              <div className="bg-black/40 rounded-xl p-3.5 space-y-2 text-xs border border-white/5">
+                <div className="flex justify-between"><span className="text-neutral-400">Tournament Entry Fee</span><span className="text-white font-bold">₹{numericFee}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-400">GST (18%)</span><span className="text-white font-bold">₹{gst}</span></div>
+                <div className="h-px bg-white/10 my-1" />
+                <div className="flex justify-between items-center">
+                  <span className="text-white font-bold text-sm">Total Payable</span>
+                  <span className="text-indigo-400 font-black text-lg">₹{totalAmount}</span>
+                </div>
+              </div>
             </div>
-            <p className="text-white font-black text-lg font-display">You're Registered!</p>
-            <p className="text-neutral-400 text-xs text-center">Confirmation sent. See you at the tournament!</p>
+
+            <div className="flex gap-3">
+              <button onClick={() => setStep('form')}
+                className="w-1/3 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-300 font-bold text-xs uppercase tracking-wider rounded-full transition-all">
+                Edit Details
+              </button>
+              <button onClick={handleProceedToPayment}
+                className="w-2/3 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs uppercase tracking-widest rounded-full transition-all flex items-center justify-center space-x-2 shadow-[0_0_20px_rgba(99,102,241,0.3)]">
+                <IndianRupee className="w-4 h-4" />
+                <span>Pay ₹{totalAmount} & Register</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP 3: PREPAID PAYMENT GATEWAY ───────────────────── */}
+        {step === 'payment' && (
+          <div className="space-y-5">
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3.5 flex items-start gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-bold text-amber-300">Prepaid Entry Required for Tournaments</p>
+                <p className="text-[11px] text-neutral-300 leading-relaxed mt-0.5">
+                  Tournament slots & bracket seeds are locked strictly upon upfront prepaid confirmation. (Regular casual turf bookings do not require prepayment).
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-neutral-900/80 border border-white/10 rounded-2xl p-4">
+              <div className="flex justify-between items-center mb-3">
+                <div>
+                  <span className="text-xs text-neutral-400 font-bold uppercase tracking-wider block">Prepaid Payment Method</span>
+                  <span className="text-[10px] text-emerald-400 font-bold">100% Advance Confirmation</span>
+                </div>
+                <span className="text-indigo-400 font-black text-base">₹{totalAmount}</span>
+              </div>
+
+              <div className="space-y-2">
+                {[
+                  { id: 'upi', label: 'UPI / GPay / PhonePe', icon: Smartphone, subtitle: 'Instant 1-Click Payment' },
+                  { id: 'card', label: 'Credit / Debit Card', icon: CreditCard, subtitle: 'Visa, Mastercard, RuPay' },
+                  { id: 'netbanking', label: 'Net Banking', icon: Building2, subtitle: 'All Major Indian Banks' },
+                ].map(m => (
+                  <label key={m.id} onClick={() => setPaymentMethod(m.id)}
+                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                      paymentMethod === m.id ? 'bg-indigo-500/10 border-indigo-500' : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.05]'
+                    }`}>
+                    <div className="flex items-center space-x-3">
+                      <div className={`p-2 rounded-lg ${paymentMethod === m.id ? 'bg-indigo-500 text-white' : 'bg-white/5 text-neutral-400'}`}>
+                        <m.icon className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-white">{m.label}</p>
+                        <p className="text-[10px] text-neutral-400">{m.subtitle}</p>
+                      </div>
+                    </div>
+                    <input type="radio" name="payMethod" checked={paymentMethod === m.id} onChange={() => {}} className="text-indigo-600 focus:ring-0" />
+                  </label>
+                ))}
+              </div>
+
+              {/* Payment Details Input Preview */}
+              <div className="mt-4 pt-3 border-t border-white/5">
+                {paymentMethod === 'upi' && (
+                  <div>
+                    <label className="text-[10px] text-neutral-400 uppercase font-bold block mb-1">Enter VPA / UPI ID</label>
+                    <input type="text" value={upiId} onChange={e => setUpiId(e.target.value)} className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-xs text-white" />
+                  </div>
+                )}
+                {paymentMethod === 'card' && (
+                  <div>
+                    <label className="text-[10px] text-neutral-400 uppercase font-bold block mb-1">Card Number</label>
+                    <input type="text" value={cardNumber} onChange={e => setCardNumber(e.target.value)} className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-xs text-white" />
+                  </div>
+                )}
+                {paymentMethod === 'netbanking' && (
+                  <div>
+                    <label className="text-[10px] text-neutral-400 uppercase font-bold block mb-1">Popular Banks</label>
+                    <div className="grid grid-cols-3 gap-2 text-[10px]">
+                      {['HDFC', 'ICICI', 'SBI', 'Axis', 'Kotak', 'Others'].map(b => (
+                        <button key={b} className="py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white font-semibold">{b}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => setStep('verify')}
+                className="w-1/3 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-300 font-bold text-xs uppercase tracking-wider rounded-full transition-all">
+                Back
+              </button>
+              <button onClick={handlePayNow}
+                className="w-2/3 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs uppercase tracking-widest rounded-full transition-all flex items-center justify-center space-x-2 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+                <CheckCircle className="w-4 h-4" />
+                <span>Confirm & Pay Prepaid ₹{totalAmount}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP 3.5: PROCESSING ───────────────────── */}
+        {step === 'processing' && (
+          <div className="flex flex-col items-center py-10 space-y-4 text-center">
+            <div className="relative">
+              <div className="w-16 h-16 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+              <ShieldCheck className="w-7 h-7 text-indigo-400 absolute inset-0 m-auto" />
+            </div>
+            <div>
+              <p className="text-white font-black text-base font-display">Processing Payment & Registration...</p>
+              <p className="text-neutral-400 text-xs mt-1">Verifying with payment gateway & locking slot for <span className="text-indigo-300 font-bold">{formData.teamName}</span></p>
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP 4: SUCCESS TICKET PASS ───────────────────── */}
+        {step === 'success' && (
+          <div className="space-y-5 text-center">
+            <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
+              <CheckCircle className="w-8 h-8" />
+            </div>
+
+            <div>
+              <h3 className="font-display font-black text-2xl text-white">Registration Confirmed!</h3>
+              <p className="text-xs text-neutral-400 mt-1">You are officially registered for the tournament.</p>
+            </div>
+
+            {/* Official Tournament Pass Card */}
+            <div className="bg-gradient-to-br from-indigo-950/60 to-purple-950/40 border border-indigo-500/30 rounded-2xl p-5 text-left relative overflow-hidden shadow-2xl">
+              <div className="absolute top-0 right-0 bg-emerald-500 text-black font-extrabold text-[9px] uppercase tracking-widest px-3 py-1 rounded-bl-xl">
+                VERIFIED PASS
+              </div>
+
+              <div className="flex items-center space-x-2 text-[10px] text-indigo-300 uppercase tracking-widest font-extrabold mb-2">
+                <QrCode className="w-3.5 h-3.5" />
+                <span>Pass ID: {ticketPassId}</span>
+              </div>
+
+              <h4 className="font-display font-bold text-white text-base leading-tight mb-3">{tournament.title}</h4>
+
+              <div className="grid grid-cols-2 gap-2 text-xs border-t border-b border-white/10 py-3 mb-3">
+                <div>
+                  <span className="text-[9px] text-neutral-400 uppercase block font-bold">Team Name</span>
+                  <span className="text-emerald-400 font-extrabold">{formData.teamName}</span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-neutral-400 uppercase block font-bold">Captain</span>
+                  <span className="text-white font-bold">{formData.captainName}</span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-neutral-400 uppercase block font-bold">Date</span>
+                  <span className="text-neutral-300">{tournament.date}</span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-neutral-400 uppercase block font-bold">Venue</span>
+                  <span className="text-neutral-300 truncate block">{tournament.venue}</span>
+                </div>
+              </div>
+
+              {/* Barcode / QR Simulation */}
+              <div className="flex items-center justify-between pt-1">
+                <div className="flex items-center space-x-1 font-mono text-[9px] text-neutral-400">
+                  <span className="w-1 h-6 bg-white/60"></span>
+                  <span className="w-2 h-6 bg-white/80"></span>
+                  <span className="w-0.5 h-6 bg-white/40"></span>
+                  <span className="w-1.5 h-6 bg-white"></span>
+                  <span className="w-1 h-6 bg-white/50"></span>
+                  <span className="w-2.5 h-6 bg-white/90"></span>
+                  <span className="w-1 h-6 bg-white/30"></span>
+                  <span className="ml-2 font-sans text-neutral-400">SLOT-CONFIRMED</span>
+                </div>
+                <span className="text-indigo-400 font-extrabold text-xs">₹{totalAmount} PAID</span>
+              </div>
+            </div>
+
+            <button onClick={onClose}
+              className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs uppercase tracking-widest rounded-full transition-colors shadow-[0_0_20px_rgba(99,102,241,0.3)]">
+              Done & View Tournaments
+            </button>
           </div>
         )}
       </motion.div>
@@ -365,7 +748,7 @@ function CreateTournamentForm({ onClose, onCreated }) {
 }
 
 /* ─── Main Component ─────────────────────────────────── */
-export default function Tournaments({ role }) {
+export default function Tournaments({ role, user }) {
   const [activeFilter, setActiveFilter] = useState('All');
   const [tournaments, setTournaments] = useState(TOURNAMENTS);
   const [myTournaments, setMyTournaments] = useState(MY_TOURNAMENTS);
@@ -576,11 +959,16 @@ export default function Tournaments({ role }) {
                     <p className="text-lg font-black text-white font-display">{t.prizePool}</p>
                   </div>
 
-                  {/* Status badge */}
-                  <div className={`absolute top-4 right-4 px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase tracking-wider border backdrop-blur-md ${
-                    isFull ? 'bg-neutral-900/80 text-neutral-400 border-white/10' : 'bg-indigo-600/80 text-white border-indigo-500/30'
-                  }`}>
-                    {isFull ? '🔴 Full' : '🟢 Open'}
+                  {/* Status & Prepaid badge */}
+                  <div className="absolute top-4 right-4 flex items-center gap-1.5">
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider border backdrop-blur-md bg-amber-500/20 text-amber-300 border-amber-500/30">
+                      Prepaid
+                    </span>
+                    <div className={`px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase tracking-wider border backdrop-blur-md ${
+                      isFull ? 'bg-neutral-900/80 text-neutral-400 border-white/10' : 'bg-indigo-600/80 text-white border-indigo-500/30'
+                    }`}>
+                      {isFull ? '🔴 Full' : '🟢 Open'}
+                    </div>
                   </div>
 
                   {/* Registered check */}
@@ -651,7 +1039,7 @@ export default function Tournaments({ role }) {
                           : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(99,102,241,0.2)]'
                       }`}
                     >
-                      {t.registered ? '✓ You\'re In' : isFull ? 'Tournament Full' : `Register — ${t.entryFee}`}
+                      {t.registered ? '✓ You\'re In' : isFull ? 'Tournament Full' : `Prepaid Register — ${t.entryFee}`}
                     </button>
                   )}
                 </div>
@@ -664,8 +1052,9 @@ export default function Tournaments({ role }) {
       {/* ── Modals ───────────────────────────────────── */}
       <AnimatePresence>
         {payModal && (
-          <PaymentModal
+          <TournamentRegistrationModal
             tournament={payModal}
+            user={user}
             onClose={() => setPayModal(null)}
             onSuccess={handleRegistered}
           />

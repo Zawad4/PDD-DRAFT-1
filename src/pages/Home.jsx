@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, Users, Clock, Award, Star, Calendar, MessageSquare, Heart, Share2, Compass, Plus, Flame } from 'lucide-react';
+import { apiCreateDirectChat, apiSubscribeVenues } from '../services/db';
 
 export default function Home({ 
   setTab, 
-  joinedMatches, 
+  joinedMatches = [], 
+  matchRequests = [],
+  onRequestJoinMatch,
+  onRequestCancelMatch,
+  onOpenHostManager,
   toggleJoinMatch, 
   bookings, 
   setBookings,
@@ -107,6 +112,36 @@ export default function Home({
       price: '₹375/lane/hr'
     }
   ]);
+
+  // Subscribe to real-time venue updates
+  useEffect(() => {
+    const unsub = apiSubscribeVenues((loadedTurfs) => {
+      if (loadedTurfs && loadedTurfs.length > 0) {
+        const mapped = loadedTurfs.map(t => {
+          const isCustom = String(t.id).startsWith('venue_') || t.owner_id != null;
+          const sportsList = Array.isArray(t.sports) && t.sports.length > 0 
+            ? t.sports 
+            : [t.category || t.sport || 'Sports'];
+          return {
+            id: t.id,
+            name: t.name,
+            image: t.image_url || t.image || 'https://images.unsplash.com/photo-1565992441121-4367fe2034cf?q=80&w=800',
+            rating: t.rating || 5.0,
+            distance: t.distance_km ? `${t.distance_km} km` : '1.4 km',
+            sports: sportsList,
+            slots: 'Active slots open',
+            price: t.price || (t.price_per_hr ? `₹${t.price_per_hr}/hr` : '₹1,000/hr'),
+            isNew: isCustom
+          };
+        });
+        setVenues(mapped);
+      }
+    });
+
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
 
   const [tournaments, setTournaments] = useState([
     {
@@ -266,14 +301,14 @@ export default function Home({
                     <p className="text-xs text-neutral-400 mt-1">List gear, racket strings, turf shoes, or sports accessories on the live store page.</p>
                   </div>
 
-                  {/* Action 4: Group & Direct Messages */}
+                  {/* Action 4: Revenue & Bookings Overview */}
                   <div 
-                    onClick={() => setTab('community')}
-                    className="glass-card p-5 border border-white/5 hover:border-pink-500/20 hover:bg-white/[0.02] transition-all cursor-pointer text-left group"
+                    onClick={() => setTab('dashboard')}
+                    className="glass-card p-5 border border-white/5 hover:border-emerald-500/20 hover:bg-white/[0.02] transition-all cursor-pointer text-left group"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-pink-500/10 text-pink-400 border border-pink-500/25 flex items-center justify-center font-bold mb-3 group-hover:scale-105 transition-all">💬</div>
-                    <h3 className="font-display font-bold text-white text-base">Chat & DMs</h3>
-                    <p className="text-xs text-neutral-400 mt-1">Engage with players in local group channels and respond directly to user questions.</p>
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 flex items-center justify-center font-bold mb-3 group-hover:scale-105 transition-all">📊</div>
+                    <h3 className="font-display font-bold text-white text-base">Bookings & Revenue</h3>
+                    <p className="text-xs text-neutral-400 mt-1">Review revenue analytics, confirmed bookings, and player attendance records.</p>
                   </div>
                 </div>
               </div>
@@ -298,20 +333,29 @@ export default function Home({
 
                 <div className="overflow-x-auto no-scrollbar flex space-x-6 pb-4">
                   {sessions.map(s => {
-                    const joined = joinedMatches.includes(s.id);
+                    const req = matchRequests.find(r => r.matchId === s.id && (r.userId === (user?.id || 'usr_curr') || r.userId === 'usr_amit_patel'));
+                    const reqStatus = req ? req.status : (joinedMatches.includes(s.id) ? 'approved' : 'none');
+                    const joined = reqStatus === 'approved';
                     const colors = getSportColors(s.sport);
                     return (
                       <div 
                         key={s.id}
-                        className="flex-shrink-0 w-[290px] glass-card p-5 relative overflow-hidden group hover:scale-[1.01] hover:border-white/10 transition-all duration-300"
+                        className="flex-shrink-0 w-[300px] glass-card p-5 relative overflow-hidden group hover:scale-[1.01] hover:border-white/10 transition-all duration-300"
                       >
-                        <div className="absolute top-4 left-4 z-10">
+                        <div className="absolute top-4 left-4 z-10 flex gap-1">
                           {s.isLive && (
                             <div className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-black/85 text-indigo-400 border border-indigo-500/20 font-black text-[9px] uppercase tracking-wider">
                               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
                               <span>LIVE</span>
                             </div>
                           )}
+                          <button
+                            onClick={() => onOpenHostManager && onOpenHostManager(s)}
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-indigo-600/90 hover:bg-indigo-500 text-white font-black text-[9px] uppercase tracking-wider cursor-pointer shadow-md"
+                            title="Host Manager: Review Player Scores & Approve Requests"
+                          >
+                            <span>Host Review</span>
+                          </button>
                         </div>
 
                         <div className="h-36 rounded-2xl overflow-hidden mb-4 relative">
@@ -348,16 +392,35 @@ export default function Home({
                             {s.skillLevel}
                           </span>
                           
-                          <button
-                            onClick={() => toggleJoinMatch(s.id)}
-                            className={`text-xs font-bold px-4 py-1.5 rounded-full border transition-all duration-300 ${
-                              joined 
-                                ? 'bg-transparent text-white border-white/20 hover:bg-white/5' 
-                                : 'bg-white text-black border-transparent hover:bg-neutral-200 shadow-md'
-                            }`}
-                          >
-                            {joined ? 'Leave' : 'Join'}
-                          </button>
+                          {reqStatus === 'approved' ? (
+                            <button
+                              onClick={() => onRequestCancelMatch ? onRequestCancelMatch(s) : toggleJoinMatch(s.id)}
+                              className="text-xs font-extrabold px-3.5 py-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/40 transition-all cursor-pointer shadow-sm"
+                              title="Click to submit cancellation request to host"
+                            >
+                              ✓ Joined (Leave)
+                            </button>
+                          ) : reqStatus === 'pending_approval' ? (
+                            <button
+                              onClick={() => onRequestCancelMatch ? onRequestCancelMatch(s) : null}
+                              className="text-xs font-extrabold px-3 py-1.5 rounded-full border border-amber-500/30 bg-amber-500/15 text-amber-300 transition-all cursor-pointer shadow-sm"
+                            >
+                              🕒 Pending Host
+                            </button>
+                          ) : reqStatus === 'cancellation_pending' ? (
+                            <button
+                              className="text-xs font-extrabold px-3 py-1.5 rounded-full border border-rose-500/30 bg-rose-500/15 text-rose-300 transition-all cursor-pointer shadow-sm"
+                            >
+                              ⏳ Leave Pending
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => onRequestJoinMatch ? onRequestJoinMatch(s) : toggleJoinMatch(s.id)}
+                              className="text-xs font-extrabold px-4 py-1.5 rounded-full bg-white text-black border-transparent hover:bg-neutral-200 transition-all cursor-pointer shadow-md"
+                            >
+                              Join Match
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -422,6 +485,11 @@ export default function Home({
                           className="w-full h-full object-cover group-hover:scale-105 transition-all duration-500"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                        {v.isNew && (
+                          <div className="absolute top-4 left-4 bg-emerald-500 text-black px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider shadow-lg flex items-center gap-1 animate-pulse">
+                            ✨ NEW
+                          </div>
+                        )}
                         <div className="absolute top-4 right-4 flex items-center bg-black/60 backdrop-blur-md px-2.5 py-1 rounded text-xs border border-white/5 text-amber-400">
                           <Star className="w-3 h-3 mr-1 fill-amber-400 text-amber-400" />
                           <span className="font-bold">{v.rating}</span>
@@ -445,17 +513,29 @@ export default function Home({
                           })}
                         </div>
 
-                        <div className="flex justify-between items-center mt-5 pt-3 border-t border-white/5">
+                        <div className="flex justify-between items-center mt-5 pt-3 border-t border-white/5 gap-2">
                           <div>
                             <p className="text-xs text-neutral-500 font-light">Price</p>
                             <p className="text-sm font-bold text-white mt-0.5">{v.price}</p>
                           </div>
-                          <button 
-                            onClick={() => handleBookVenue(v)}
-                            className="text-xs font-bold bg-white text-black px-4 py-2 rounded-full hover:bg-neutral-200 transition-colors shadow-sm"
-                          >
-                            Book Now
-                          </button>
+                          <div className="flex items-center space-x-2">
+                            <button 
+                              onClick={() => {
+                                alert(`Contact ${v.name || 'Venue Owner'} directly at ${v.phone || '+91 98765 43210'}.`);
+                              }}
+                              className="text-xs font-bold bg-white/10 hover:bg-white/20 border border-white/10 text-white px-3 py-2 rounded-full transition-colors flex items-center gap-1 cursor-pointer"
+                              title="Contact venue owner directly"
+                            >
+                              <MessageSquare className="w-3 h-3 text-indigo-400" />
+                              <span>Contact</span>
+                            </button>
+                            <button 
+                              onClick={() => handleBookVenue(v)}
+                              className="text-xs font-bold bg-white text-black px-4 py-2 rounded-full hover:bg-neutral-200 transition-colors shadow-sm cursor-pointer"
+                            >
+                              Book Now
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -516,55 +596,7 @@ export default function Home({
         </div>
       </div>
 
-      {/* APP DOWNLOAD BANNER */}
-      <div className="mt-16 w-full relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-950 px-8 py-10 shadow-2xl text-left">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_120%,rgba(99,102,241,0.15),transparent_50%)]" />
-        <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="space-y-2 max-w-xl">
-            <span className="text-[10px] text-indigo-400 font-extrabold uppercase tracking-widest bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-full">
-              Mobile App Available
-            </span>
-            <h3 className="font-display font-black text-2xl tracking-tight text-white uppercase mt-2">
-              Take Turfington Everywhere
-            </h3>
-            <p className="text-neutral-400 text-xs font-light leading-relaxed">
-              Book turf slots instantly, organize friendly matchups, chat in real-time with local athletes, and track achievements on the go. Available for iOS and Android.
-            </p>
-          </div>
-          
-          <div className="flex items-center gap-3.5 flex-wrap">
-            <a 
-              href="https://apps.apple.com/app/turfington" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="flex items-center gap-2.5 px-5 py-2.5 bg-black hover:bg-neutral-900 border border-white/10 hover:border-white/20 rounded-xl transition-all duration-300 transform hover:-translate-y-0.5"
-            >
-              <svg className="w-5 h-5 text-white fill-current" viewBox="0 0 24 24">
-                <path d="M18.71,19.5C17.88,20.74,17,21.95,15.66,22a1.39,1.39,0,0,1-1.07-.33c-.7-.45-1.46-.45-2.19,0a1.44,1.44,0,0,1-1.09.33c-1.34-.05-2.29-1.29-3.11-2.48C6.54,17,5.29,12.48,6.59,10.22a3.75,3.75,0,0,1,3.15-1.92c.9,0,1.55.51,2.09.51s1.14-.5,2-.5A3.42,3.42,0,0,1,16.57,9.9,3.58,3.58,0,0,0,18.7,13a3.52,3.52,0,0,0,2.15,2.44,7.84,7.84,0,0,1-2.14,4.06M15.91,6.5a3.17,3.17,0,0,0,.75-2.27,3.12,3.12,0,0,0-2.07,1.06,3.19,3.19,0,0,0-.77,2.23A2.88,2.88,0,0,0,15.91,6.5Z"/>
-              </svg>
-              <div className="text-left leading-tight">
-                <p className="text-[9px] text-neutral-500 uppercase font-bold">Download on the</p>
-                <p className="text-xs font-black text-white font-display">App Store</p>
-              </div>
-            </a>
-            
-            <a 
-              href="https://play.google.com/store/apps/details?id=com.turfington" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="flex items-center gap-2.5 px-5 py-2.5 bg-black hover:bg-neutral-900 border border-white/10 hover:border-white/20 rounded-xl transition-all duration-300 transform hover:-translate-y-0.5"
-            >
-              <svg className="w-5 h-5 text-indigo-400 fill-current" viewBox="0 0 24 24">
-                <path d="M5,3.29A2.77,2.77,0,0,0,4.22,5.1V18.9a2.77,2.77,0,0,0,.78,1.81L14.36,11.3,5,3.29M15.78,9.93,17.9,8.73,5.92,1.9a1.86,1.86,0,0,0-1.7,0l11.56,8M15.78,12.67l-10.78,9.2a1.86,1.86,0,0,0,1.7,0l12-6.83-2.92-2.37M20.19,10l-3,1.69,2.82,2.28a2,2,0,0,0,.68-1.5,2,2,0,0,0-.5-2.47Z"/>
-              </svg>
-              <div className="text-left leading-tight">
-                <p className="text-[9px] text-neutral-500 uppercase font-bold">Get it on</p>
-                <p className="text-xs font-black text-white font-display">Google Play</p>
-              </div>
-            </a>
-          </div>
-        </div>
-      </div>
+
 
     </div>
   );

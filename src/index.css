@@ -1,8 +1,56 @@
 @import "tailwindcss";
 
+/* ── ITC Avant Garde Gothic Web Font ──────────────────────── */
+@font-face {
+  font-family: 'Avant Garde Gothic';
+  src: url('/fonts/ITCAvantGardeStdBold.woff') format('woff'),
+       url('https://fonts.cdnfonts.com/s/30933/ITCAvantGardeStdBold.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Avant Garde Gothic';
+  src: url('/fonts/ITCAvantGardeStdMd.woff') format('woff'),
+       url('https://fonts.cdnfonts.com/s/30933/ITCAvantGardeStdMd.woff') format('woff');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Avant Garde Gothic';
+  src: url('/fonts/ITCAvantGardeStdBk.woff') format('woff'),
+       url('https://fonts.cdnfonts.com/s/30933/ITCAvantGardeStdBk.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'ITC Avant Garde Gothic Std';
+  src: url('/fonts/ITCAvantGardeStdBold.woff') format('woff'),
+       url('https://fonts.cdnfonts.com/s/30933/ITCAvantGardeStdBold.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Avant Garde Gothic Bold';
+  src: url('/fonts/ITCAvantGardeStdBold.woff') format('woff'),
+       url('https://fonts.cdnfonts.com/s/30933/ITCAvantGardeStdBold.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   --font-sans: "Inter", sans-serif;
   --font-display: "Outfit", sans-serif;
+  --font-avantgarde: "Avant Garde Gothic", "ITC Avant Garde Gothic Std", "ITC Avant Garde Gothic", "Century Gothic", sans-serif;
+  --font-hero: "Avant Garde Gothic", "ITC Avant Garde Gothic Std", "ITC Avant Garde Gothic", "Century Gothic", sans-serif;
   
   --color-luxury-bg: #080808;
   --color-luxury-card: rgba(12, 12, 12, 0.65);
@@ -11,6 +59,17 @@
   --color-luxury-border-hover: rgba(255, 255, 255, 0.14);
   --color-chrome-start: #ffffff;
   --color-chrome-end: #8e8e93;
+}
+
+.font-avantgarde,
+.font-hero {
+  font-family: 'Avant Garde Gothic', 'ITC Avant Garde Gothic Std', 'ITC Avant Garde Gothic', 'Century Gothic', sans-serif !important;
+}
+
+.hero-heading {
+  font-family: 'Avant Garde Gothic', 'ITC Avant Garde Gothic Std', 'ITC Avant Garde Gothic', 'Century Gothic', sans-serif !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.025em;
 }
 
 /* ============================================================
@@ -87,10 +146,10 @@
 .light-mode .text-neutral-600            { color: #6b7280 !important; }
 
 /* ── Backgrounds ──────────────────────────────────────────── */
-.light-mode .bg-\[#080808\]              { background-color: #f2f0eb !important; }
-.light-mode .bg-\[#040404\]              { background-color: #e8e6e1 !important; }
-.light-mode .bg-\[#0c0c0c\]             { background-color: #f0eeea !important; }
-.light-mode .bg-\[#0d0d0d\]             { background-color: #ede9e3 !important; }
+.light-mode .bg-\[\#080808\]              { background-color: #f2f0eb !important; }
+.light-mode .bg-\[\#040404\]              { background-color: #e8e6e1 !important; }
+.light-mode .bg-\[\#0c0c0c\]             { background-color: #f0eeea !important; }
+.light-mode .bg-\[\#0d0d0d\]             { background-color: #ede9e3 !important; }
 .light-mode .bg-neutral-900             { background-color: #e8e6e1 !important; }
 .light-mode .bg-neutral-800             { background-color: #ddd9d3 !important; }
 .light-mode .bg-black\/80               { background-color: rgba(255,255,253,0.92) !important; }
@@ -129,7 +188,7 @@
 }
 
 /* Mobile full-screen menu */
-.light-mode .fixed.inset-0.bg-\[#080808\] {
+.light-mode .fixed.inset-0.bg-\[\#080808\] {
   background-color: #f2f0eb !important;
 }
 

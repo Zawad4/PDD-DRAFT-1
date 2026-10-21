@@ -1,0 +1,56 @@
+name: Enterprise E2E Selenium Test Automation Pipeline
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  selenium-e2e-tests:
+    name: Selenium WebDriver Cross-Browser E2E Execution
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        browser: [chrome]
+
+    steps:
+      - name: 1. Checkout Repository Code
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 3. Install NPM Dependencies
+        run: npm ci
+
+      - name: 4. Start React Web Application Server
+        run: |
+          npm run dev &
+          npx wait-on http://localhost:5173 --timeout 30000
+
+      - name: 5. Run Selenium E2E Test Suite (${{ matrix.browser }})
+        env:
+          BROWSER: ${{ matrix.browser }}
+          HEADLESS: true
+        run: npm run test:e2e
+
+      - name: 6. Generate ExcelJS and Mochawesome Reports
+        if: always()
+        run: npm run generate:reports
+
+      - name: 7. Upload E2E Excel & HTML Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Selenium-E2E-Reports-${{ matrix.browser }}
+          path: |
+            reports/
+            reports/excel/E2E_Report.xlsx
+            screenshots/
+            logs/
+          retention-days: 30

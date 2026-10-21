@@ -1,0 +1,24 @@
+{
+  "environment": "Local Dev",
+  "baseUrl": "http://localhost:5173",
+  "browser": "chrome",
+  "headless": true,
+  "timeouts": {
+    "implicit": 5000,
+    "explicit": 10000,
+    "pageLoad": 30000
+  },
+  "retries": 2,
+  "paths": {
+    "reports": "reports",
+    "excel": "reports/excel",
+    "screenshots": "reports/screenshots",
+    "failures": "reports/failures",
+    "logs": "logs"
+  },
+  "browsersSupported": ["chrome", "firefox", "edge"],
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  }
+}

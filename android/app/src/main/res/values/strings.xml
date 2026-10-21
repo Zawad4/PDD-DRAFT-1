@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Turfington</string>
+    <string name="title_activity_main">Turfington</string>
+    <string name="package_name">com.turfington.app</string>
+    <string name="custom_url_scheme">com.turfington.app</string>
+</resources>

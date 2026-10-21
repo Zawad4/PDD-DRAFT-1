@@ -1,0 +1,19 @@
+{
+  "validUser": {
+    "email": "rahul.sharma@gmail.com",
+    "password": "Password123!",
+    "name": "Rahul Sharma"
+  },
+  "invalidUser": {
+    "email": "invalid.user@nonexistent.domain",
+    "password": "WrongPassword999!"
+  },
+  "emptyCredentials": {
+    "email": "",
+    "password": ""
+  },
+  "invalidEmailFormat": {
+    "email": "invalid-email-format",
+    "password": "Password123!"
+  }
+}
