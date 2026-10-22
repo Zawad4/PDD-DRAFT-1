@@ -18,17 +18,17 @@ import {
   Users,
   ChevronDown
 } from 'lucide-react';
-import { apiFetchPlayerReviews, apiSubmitPlayerReview, apiToggleReviewHelpful, apiFetchAthletes } from '../services/db';
+import { apiFetchPlayerReviews, apiSubmitPlayerReview, apiToggleReviewHelpful, apiFetchAthletes, getRatingColor } from '../services/db';
 
 const ENDORSEMENT_BADGES = [
-  { id: 'Clutch Player', label: 'Clutch Player', icon: '⚡', color: 'from-amber-500/20 to-orange-500/20 text-amber-400 border-amber-500/30' },
-  { id: 'Fair Play Champion', label: 'Fair Play Champion', icon: '🕊️', color: 'from-emerald-500/20 to-teal-500/20 text-emerald-400 border-emerald-500/30' },
-  { id: 'Always On Time', label: 'Always On Time', icon: '⏰', color: 'from-blue-500/20 to-indigo-500/20 text-blue-400 border-blue-500/30' },
-  { id: 'Team Motivator', label: 'Team Motivator', icon: '🤝', color: 'from-purple-500/20 to-pink-500/20 text-purple-400 border-purple-500/30' },
-  { id: 'Rock-Solid Defense', label: 'Rock-Solid Defense', icon: '🛡️', color: 'from-cyan-500/20 to-blue-500/20 text-cyan-400 border-cyan-500/30' },
-  { id: 'Deadly Precision', label: 'Deadly Precision', icon: '🎯', color: 'from-rose-500/20 to-red-500/20 text-rose-400 border-rose-500/30' },
-  { id: 'High Work Rate', label: 'High Work Rate', icon: '🔥', color: 'from-orange-500/20 to-amber-500/20 text-orange-400 border-orange-500/30' },
-  { id: 'Natural Leader', label: 'Natural Leader', icon: '👑', color: 'from-yellow-500/20 to-amber-500/20 text-yellow-400 border-yellow-500/30' }
+  { id: 'Clutch Player', label: 'Clutch Player', icon: '⚡', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Fair Play Champion', label: 'Fair Play Champion', icon: '🕊️', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Always On Time', label: 'Always On Time', icon: '⏰', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Team Motivator', label: 'Team Motivator', icon: '🤝', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Rock-Solid Defense', label: 'Rock-Solid Defense', icon: '🛡️', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Deadly Precision', label: 'Deadly Precision', icon: '🎯', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'High Work Rate', label: 'High Work Rate', icon: '🔥', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Natural Leader', label: 'Natural Leader', icon: '👑', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' }
 ];
 
 const SPORT_OPTIONS = ['Football', 'Cricket', 'Badminton', 'Pickleball', 'Tennis', 'Basketball', 'Table Tennis'];
@@ -223,15 +223,15 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
       </AnimatePresence>
 
       {/* ── 1. HEADER & PLAYER SELECTOR BAR ── */}
-      <div className="glass-card p-6 border border-white/10 rounded-3xl bg-gradient-to-r from-neutral-900/90 via-indigo-950/20 to-neutral-900/90 flex flex-col md:flex-row md:items-center justify-between gap-5">
+      <div className="glass-card p-6 border border-white/5 rounded-3xl bg-neutral-900/60 flex flex-col md:flex-row md:items-center justify-between gap-5">
         <div>
-          <div className="flex items-center space-x-2 text-indigo-400 text-xs font-extrabold uppercase tracking-widest mb-1.5">
-            <Award className="w-4 h-4" />
+          <div className="flex items-center space-x-2 text-neutral-400 text-[10px] font-mono uppercase tracking-widest mb-1.5">
+            <Award className="w-3.5 h-3.5 text-neutral-400" />
             <span>Peer Reputation & Verified Feedback</span>
           </div>
-          <h2 className="font-display font-black text-2xl text-white tracking-wide flex items-center gap-2.5">
+          <h2 className="font-display font-bold text-xl text-white tracking-tight flex items-center gap-2.5">
             <span>Peer Reviews & Endorsements</span>
-            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-white/5 text-neutral-300 border border-white/10">
               {reviewsData.totalReviews} Reviews
             </span>
           </h2>
@@ -250,7 +250,7 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                 const found = athleteDirectory.find(a => a.id === e.target.value);
                 if (found) setSelectedPlayer(found);
               }}
-              className="appearance-none bg-neutral-900 border border-white/10 rounded-full px-4 py-2.5 pr-9 text-xs font-bold text-neutral-200 hover:border-indigo-500/50 focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
+              className="appearance-none bg-neutral-900/90 border border-white/10 rounded-full px-4 py-2.5 pr-9 text-xs font-semibold text-neutral-200 hover:border-white/25 focus:outline-none focus:border-white/40 cursor-pointer transition-all"
             >
               <option value={targetPlayer?.id || 'usr_self'}>
                 👤 {targetPlayer?.full_name || targetPlayer?.name || 'My Profile'} (You)
@@ -267,103 +267,117 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
           {/* Write Review Button */}
           <button
             onClick={() => setIsModalOpen(true)}
-            className="px-5 py-2.5 rounded-full bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-extrabold text-xs uppercase tracking-wider flex items-center space-x-2 shadow-lg shadow-indigo-600/30 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            className="px-5 py-2.5 rounded-full bg-white text-black hover:bg-neutral-200 font-bold text-xs uppercase tracking-wider flex items-center space-x-2 shadow-md transition-all cursor-pointer"
           >
-            <Plus className="w-4 h-4 stroke-[3]" />
+            <Plus className="w-4 h-4 stroke-[2.5]" />
             <span>Write Peer Review</span>
           </button>
         </div>
       </div>
 
       {/* ── 2. DUAL SCORES & REPUTATION DASHBOARD ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {/* Card 1: Performance Rating */}
-        <div className="glass-card p-6 border border-indigo-500/20 bg-indigo-500/[0.03] rounded-3xl space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-400 flex items-center gap-1.5">
-              <Flame className="w-4 h-4 text-orange-400" /> Match Performance
-            </span>
-            <div className="flex items-center space-x-1 text-amber-400">
-              <Star className="w-4 h-4 fill-amber-400" />
-              <span className="text-xs font-black text-white">{reviewsData.avgPerformance}</span>
-            </div>
-          </div>
-          <div className="flex items-baseline space-x-2.5">
-            <span className="font-display font-black text-4xl text-white tracking-tight">{reviewsData.avgPerformance}</span>
-            <span className="text-xs font-bold text-neutral-400">/ 5.0 Rating</span>
-          </div>
-          <div className="w-full bg-neutral-800/80 h-2 rounded-full overflow-hidden">
-            <div
-              className="bg-gradient-to-r from-indigo-500 to-cyan-400 h-full rounded-full transition-all duration-700"
-              style={{ width: `${(reviewsData.avgPerformance / 5) * 100}%` }}
-            />
-          </div>
-          <p className="text-[11px] text-neutral-400 font-light">
-            Reflects clutch performance, stamina, tactical vision, and game-changing plays in verified matches.
-          </p>
-        </div>
-
-        {/* Card 2: Behaviour & Sportsmanship */}
-        <div className="glass-card p-6 border border-emerald-500/20 bg-emerald-500/[0.03] rounded-3xl space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" /> Sportsmanship & Behaviour
-            </span>
-            <div className="flex items-center space-x-1 text-amber-400">
-              <Star className="w-4 h-4 fill-amber-400" />
-              <span className="text-xs font-black text-white">{reviewsData.avgBehaviour}</span>
-            </div>
-          </div>
-          <div className="flex items-baseline space-x-2.5">
-            <span className="font-display font-black text-4xl text-white tracking-tight">{reviewsData.avgBehaviour}</span>
-            <span className="text-xs font-bold text-neutral-400">/ 5.0 Rating</span>
-          </div>
-          <div className="w-full bg-neutral-800/80 h-2 rounded-full overflow-hidden">
-            <div
-              className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-700"
-              style={{ width: `${(reviewsData.avgBehaviour / 5) * 100}%` }}
-            />
-          </div>
-          <p className="text-[11px] text-neutral-400 font-light">
-            Reflects fair play, respect for referee & opponents, calm temperament under pressure, and zero toxicity.
-          </p>
-        </div>
-
-        {/* Card 3: Combined Peer Athlete Score */}
-        <div className="glass-card p-6 border border-amber-500/20 bg-amber-500/[0.03] rounded-3xl space-y-3 relative overflow-hidden flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-amber-400 flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-amber-400" /> Overall Peer Grade
-              </span>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                S-Tier Athlete
-              </span>
-            </div>
-            <div className="flex items-baseline space-x-2 mt-2">
-              <span className="font-display font-black text-4xl text-amber-400">{reviewsData.overallScore}</span>
-              <span className="text-xs font-bold text-neutral-400">/ 5.0</span>
-            </div>
-          </div>
-
-          {/* Quick Rating Distribution Breakdown */}
-          <div className="space-y-1 pt-2">
-            {[5, 4, 3].map(stars => {
-              const count = reviewsData.distribution?.[stars] || 0;
-              const pct = reviewsData.totalReviews > 0 ? (count / reviewsData.totalReviews) * 100 : (stars === 5 ? 85 : 15);
-              return (
-                <div key={stars} className="flex items-center space-x-2 text-[10px] text-neutral-400">
-                  <span className="w-4 font-bold">{stars}★</span>
-                  <div className="flex-1 bg-neutral-800 h-1.5 rounded-full overflow-hidden">
-                    <div className="bg-amber-400 h-full rounded-full" style={{ width: `${pct}%` }} />
-                  </div>
-                  <span className="w-6 text-right font-mono">{count}</span>
+      {(() => {
+        const perfStyle = getRatingColor(reviewsData.avgPerformance);
+        const behStyle = getRatingColor(reviewsData.avgBehaviour);
+        const overallStyle = getRatingColor(reviewsData.overallScore);
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Card 1: Performance Rating */}
+            <div className={`glass-card p-6 border ${perfStyle.borderLight} bg-neutral-900/70 hover:border-white/15 rounded-3xl space-y-3 relative overflow-hidden transition-colors`}>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
+                  <Flame className="w-3.5 h-3.5 text-neutral-400" /> Match Performance
+                </span>
+                <div className={`flex items-center space-x-1 ${perfStyle.text}`}>
+                  <Star className={`w-3.5 h-3.5 ${perfStyle.starFill}`} />
+                  <span className="text-xs font-bold">{reviewsData.avgPerformance}</span>
                 </div>
-              );
-            })}
+              </div>
+              <div className="flex items-baseline space-x-2">
+                <span className={`font-display font-black text-3xl tracking-tight ${perfStyle.text}`}>{reviewsData.avgPerformance}</span>
+                <span className="text-xs font-medium text-neutral-400">/ 5.0 Rating</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${perfStyle.border} ${perfStyle.bgMuted} ${perfStyle.text}`}>
+                  {perfStyle.label}
+                </span>
+              </div>
+              <div className="w-full bg-neutral-800/80 h-1.5 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 bg-gradient-to-r ${perfStyle.gradient}`}
+                  style={{ width: `${Math.min(100, Math.max(5, (reviewsData.avgPerformance / 5) * 100))}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-neutral-400 font-light">
+                Reflects clutch performance, stamina, tactical vision, and game-changing plays in verified matches.
+              </p>
+            </div>
+
+            {/* Card 2: Behaviour & Sportsmanship */}
+            <div className={`glass-card p-6 border ${behStyle.borderLight} bg-neutral-900/70 hover:border-white/15 rounded-3xl space-y-3 relative overflow-hidden transition-colors`}>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-neutral-400" /> Sportsmanship & Behaviour
+                </span>
+                <div className={`flex items-center space-x-1 ${behStyle.text}`}>
+                  <Star className={`w-3.5 h-3.5 ${behStyle.starFill}`} />
+                  <span className="text-xs font-bold">{reviewsData.avgBehaviour}</span>
+                </div>
+              </div>
+              <div className="flex items-baseline space-x-2">
+                <span className={`font-display font-black text-3xl tracking-tight ${behStyle.text}`}>{reviewsData.avgBehaviour}</span>
+                <span className="text-xs font-medium text-neutral-400">/ 5.0 Rating</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${behStyle.border} ${behStyle.bgMuted} ${behStyle.text}`}>
+                  {behStyle.label}
+                </span>
+              </div>
+              <div className="w-full bg-neutral-800/80 h-1.5 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 bg-gradient-to-r ${behStyle.gradient}`}
+                  style={{ width: `${Math.min(100, Math.max(5, (reviewsData.avgBehaviour / 5) * 100))}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-neutral-400 font-light">
+                Reflects fair play, respect for referee & opponents, calm temperament under pressure, and zero toxicity.
+              </p>
+            </div>
+
+            {/* Card 3: Overall Rating (NOT Peer Performance & Behaviour) */}
+            <div className={`glass-card p-6 border ${overallStyle.borderLight} bg-neutral-900/70 hover:border-white/15 rounded-3xl space-y-3 relative overflow-hidden flex flex-col justify-between transition-colors`}>
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-neutral-400" /> Overall Rating
+                  </span>
+                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${overallStyle.border} ${overallStyle.bgMuted} ${overallStyle.text}`}>
+                    {overallStyle.label}
+                  </span>
+                </div>
+                <div className="flex items-baseline space-x-2 mt-2">
+                  <span className={`font-display font-black text-3xl tracking-tight ${overallStyle.text}`}>{reviewsData.overallScore}★</span>
+                  <span className="text-xs font-medium text-neutral-400">/ 5.0</span>
+                </div>
+              </div>
+
+              {/* Quick Rating Distribution Breakdown */}
+              <div className="space-y-1.5 pt-2">
+                {[5, 4, 3].map(stars => {
+                  const count = reviewsData.distribution?.[stars] || 0;
+                  const pct = reviewsData.totalReviews > 0 ? (count / reviewsData.totalReviews) * 100 : (stars === 5 ? 85 : 15);
+                  const rowStyle = getRatingColor(stars);
+                  return (
+                    <div key={stars} className="flex items-center space-x-2 text-[10px] text-neutral-400">
+                      <span className={`w-4 font-semibold ${rowStyle.text}`}>{stars}★</span>
+                      <div className="flex-1 bg-neutral-800/80 h-1.5 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full bg-gradient-to-r ${rowStyle.gradient}`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="w-6 text-right font-mono text-neutral-400">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* ── 3. TOP ENDORSEMENT BADGES ── */}
       <div className="glass-card p-6 border border-white/5 rounded-3xl space-y-3.5">
@@ -486,16 +500,24 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                       </div>
                     </div>
 
-                    {/* Dual Score Badges */}
+                    {/* Dual Score Badges with Dynamic Green/Yellow/Red Coloring */}
                     <div className="flex items-center space-x-2.5 self-start sm:self-center">
-                      <div className="px-3 py-1.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-bold flex items-center space-x-1">
-                        <Flame className="w-3.5 h-3.5 text-orange-400" />
-                        <span>Skill: {rev.performance_rating}/5★</span>
-                      </div>
-                      <div className="px-3 py-1.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-bold flex items-center space-x-1">
-                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Behaviour: {rev.behaviour_rating}/5★</span>
-                      </div>
+                      {(() => {
+                        const pStyle = getRatingColor(rev.performance_rating);
+                        const bStyle = getRatingColor(rev.behaviour_rating);
+                        return (
+                          <>
+                            <div className={`px-3 py-1 rounded-full ${pStyle.bgMuted} border ${pStyle.border} ${pStyle.text} text-xs font-bold flex items-center space-x-1.5`}>
+                              <Star className={`w-3.5 h-3.5 ${pStyle.starFill}`} />
+                              <span>Skill {rev.performance_rating}/5</span>
+                            </div>
+                            <div className={`px-3 py-1 rounded-full ${bStyle.bgMuted} border ${bStyle.border} ${bStyle.text} text-xs font-bold flex items-center space-x-1.5`}>
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                              <span>Fair Play {rev.behaviour_rating}/5</span>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -507,7 +529,7 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                         return (
                           <span
                             key={bName}
-                            className={`text-[10px] font-extrabold px-2.5 py-1 rounded-xl border flex items-center space-x-1 ${bObj ? bObj.color : 'bg-white/5 border-white/10 text-neutral-300'}`}
+                            className={`text-[10px] font-medium px-2.5 py-1 rounded-xl border flex items-center space-x-1.5 ${bObj ? bObj.color : 'bg-white/5 border-white/10 text-neutral-300'}`}
                           >
                             <span>{bObj ? bObj.icon : '🏅'}</span>
                             <span>{bName}</span>
@@ -518,26 +540,26 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                   )}
 
                   {/* Written Comment Quote */}
-                  <div className="bg-white/[0.02] border-l-2 border-indigo-500 p-4 rounded-r-2xl">
-                    <p className="text-xs text-neutral-200 leading-relaxed italic">
+                  <div className="bg-white/[0.02] border-l-2 border-white/20 p-4 rounded-r-2xl">
+                    <p className="text-xs text-neutral-300 leading-relaxed italic">
                       "{rev.comment}"
                     </p>
                   </div>
 
                   {/* Helpful Thumbs-Up Button */}
                   <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs text-neutral-400">
-                    <span className="text-[11px] text-neutral-500">
-                      Peer Verified Sportsmanship Score
+                    <span className="text-[11px] text-neutral-500 font-light">
+                      Verified Peer Sportsmanship Record
                     </span>
                     <button
                       onClick={() => handleToggleHelpful(rev.id)}
-                      className={`flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs font-bold transition-all cursor-pointer ${
+                      className={`flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-all cursor-pointer ${
                         hasReacted
-                          ? 'border-indigo-500 bg-indigo-500/20 text-indigo-300'
+                          ? 'border-white/30 bg-white/10 text-white'
                           : 'border-white/10 bg-white/5 text-neutral-400 hover:text-white hover:bg-white/10'
                       }`}
                     >
-                      <ThumbsUp className={`w-3.5 h-3.5 ${hasReacted ? 'fill-indigo-400 text-indigo-400' : ''}`} />
+                      <ThumbsUp className={`w-3.5 h-3.5 ${hasReacted ? 'fill-white text-white' : ''}`} />
                       <span>Helpful ({rev.helpful_count || 0})</span>
                     </button>
                   </div>
@@ -569,13 +591,13 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2.5 rounded-2xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
-                    <Award className="w-6 h-6" />
+                  <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10 text-neutral-300">
+                    <Award className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="font-display font-black text-white text-lg">Write Peer Athlete Review</h3>
+                    <h3 className="font-display font-bold text-white text-lg tracking-tight">Write Peer Athlete Review</h3>
                     <p className="text-xs text-neutral-400 mt-0.5">
-                      Reviewing <span className="font-bold text-white">{activePlayerName}</span>
+                      Reviewing <span className="font-semibold text-white">{activePlayerName}</span>
                     </p>
                   </div>
                 </div>
@@ -589,72 +611,80 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
 
               <form onSubmit={handleSubmitReview} className="space-y-6">
                 {/* 1. Performance Rating (1 - 5 Stars) */}
-                <div className="space-y-2 p-4 rounded-2xl bg-white/[0.02] border border-indigo-500/20">
+                <div className="space-y-2 p-4 rounded-2xl bg-white/[0.02] border border-white/10">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-extrabold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-                      <Flame className="w-4 h-4 text-orange-400" /> Match Performance & Skill
+                    <label className="text-xs font-semibold uppercase tracking-wider text-neutral-300 flex items-center gap-1.5">
+                      <Star className="w-3.5 h-3.5 text-neutral-300" /> Match Performance & Skill
                     </label>
-                    <span className="text-xs font-bold text-amber-400">
+                    <span className={`text-xs font-semibold ${getRatingColor(perfHover || perfRating).text}`}>
                       {perfHover || perfRating} / 5 Stars
                     </span>
                   </div>
                   <div className="flex items-center space-x-2 py-1">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        type="button"
-                        onMouseEnter={() => setPerfHover(star)}
-                        onMouseLeave={() => setPerfHover(0)}
-                        onClick={() => setPerfRating(star)}
-                        className="p-1 hover:scale-125 transition-transform cursor-pointer"
-                      >
-                        <Star
-                          className={`w-7 h-7 transition-colors ${
-                            star <= (perfHover || perfRating)
-                              ? 'fill-amber-400 text-amber-400'
-                              : 'text-neutral-700'
-                          }`}
-                        />
-                      </button>
-                    ))}
+                    {[1, 2, 3, 4, 5].map((star) => {
+                      const curVal = perfHover || perfRating;
+                      const activeStyle = getRatingColor(curVal);
+                      return (
+                        <button
+                          key={star}
+                          type="button"
+                          onMouseEnter={() => setPerfHover(star)}
+                          onMouseLeave={() => setPerfHover(0)}
+                          onClick={() => setPerfRating(star)}
+                          className="p-1 hover:scale-125 transition-transform cursor-pointer"
+                        >
+                          <Star
+                            className={`w-7 h-7 transition-colors ${
+                              star <= curVal
+                                ? activeStyle.starFill
+                                : 'text-neutral-700'
+                            }`}
+                          />
+                        </button>
+                      );
+                    })}
                   </div>
                   <p className="text-[11px] text-neutral-400 font-light">
-                    Level: <span className="text-white font-bold">{PERFORMANCE_LABELS[perfHover || perfRating]}</span>
+                    Level: <span className={`font-semibold ${getRatingColor(perfHover || perfRating).text}`}>{PERFORMANCE_LABELS[perfHover || perfRating]}</span>
                   </p>
                 </div>
 
                 {/* 2. Behaviour & Sportsmanship Rating (1 - 5 Stars) */}
-                <div className="space-y-2 p-4 rounded-2xl bg-white/[0.02] border border-emerald-500/20">
+                <div className="space-y-2 p-4 rounded-2xl bg-white/[0.02] border border-white/10">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-extrabold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                      <ShieldCheck className="w-4 h-4 text-emerald-400" /> Behaviour & Sportsmanship
+                    <label className="text-xs font-semibold uppercase tracking-wider text-neutral-300 flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-neutral-300" /> Behaviour & Sportsmanship
                     </label>
-                    <span className="text-xs font-bold text-amber-400">
+                    <span className={`text-xs font-semibold ${getRatingColor(behHover || behRating).text}`}>
                       {behHover || behRating} / 5 Stars
                     </span>
                   </div>
                   <div className="flex items-center space-x-2 py-1">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        type="button"
-                        onMouseEnter={() => setBehHover(star)}
-                        onMouseLeave={() => setBehHover(0)}
-                        onClick={() => setBehRating(star)}
-                        className="p-1 hover:scale-125 transition-transform cursor-pointer"
-                      >
-                        <Star
-                          className={`w-7 h-7 transition-colors ${
-                            star <= (behHover || behRating)
-                              ? 'fill-amber-400 text-amber-400'
-                              : 'text-neutral-700'
-                          }`}
-                        />
-                      </button>
-                    ))}
+                    {[1, 2, 3, 4, 5].map((star) => {
+                      const curVal = behHover || behRating;
+                      const activeStyle = getRatingColor(curVal);
+                      return (
+                        <button
+                          key={star}
+                          type="button"
+                          onMouseEnter={() => setBehHover(star)}
+                          onMouseLeave={() => setBehHover(0)}
+                          onClick={() => setBehRating(star)}
+                          className="p-1 hover:scale-125 transition-transform cursor-pointer"
+                        >
+                          <Star
+                            className={`w-7 h-7 transition-colors ${
+                              star <= curVal
+                                ? activeStyle.starFill
+                                : 'text-neutral-700'
+                            }`}
+                          />
+                        </button>
+                      );
+                    })}
                   </div>
                   <p className="text-[11px] text-neutral-400 font-light">
-                    Level: <span className="text-white font-bold">{BEHAVIOUR_LABELS[behHover || behRating]}</span>
+                    Level: <span className={`font-semibold ${getRatingColor(behHover || behRating).text}`}>{BEHAVIOUR_LABELS[behHover || behRating]}</span>
                   </p>
                 </div>
 

@@ -4,7 +4,7 @@ import {
   Compass, Home as HomeIcon, ShoppingBag, Trophy,
   User, LayoutDashboard, Menu, Building2, ChevronDown,
   LogOut, Settings, UserCircle, MapPin, Flame, Loader2,
-  ArrowLeftRight, RefreshCw, Headphones
+  ArrowLeftRight, RefreshCw, Headphones, MessageSquare
 } from 'lucide-react';
 
 import { Suspense, lazy } from 'react';
@@ -51,21 +51,19 @@ const saveLocalState = (key, val) => {
    ════════════════════════════════════════════════════════════ */
 export default function App() {
   /* ── auth & profile state ─────────────────────────────────── */
-  const [activeProfile, setActiveProfile] = useState(() => loadLocalState('turfington_active_user', {
-    id: 'usr_amit_patel',
-    full_name: 'Amit Patel',
-    email: 'amit.patel@turfington.com',
-    role: 'player',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
-    sport: 'Football & Cricket',
-    location: 'Anna Nagar, Chennai'
-  }));
+  const [activeProfile, setActiveProfile] = useState(() => loadLocalState('turfington_active_user', null));
 
   const user = activeProfile;
   const setUser = (newProfile) => {
     setActiveProfile(newProfile);
     if (newProfile) {
       saveLocalState('turfington_active_user', newProfile);
+    } else {
+      localStorage.removeItem('turfington_active_user');
+      localStorage.removeItem('turfington_current_profile');
+      localStorage.removeItem('turfington_user');
+      localStorage.removeItem('userRole');
+      localStorage.removeItem('turfington_auth_user');
     }
   };
 
@@ -297,12 +295,19 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await auth.signOut();
+    try {
+      await auth.signOut();
+    } catch {}
     setUser(null);
     setFirebaseUser(null);
     setShowUserMenu(false);
     setActiveTab('landing');
     setMobileMenuOpen(false);
+    localStorage.removeItem('turfington_active_user');
+    localStorage.removeItem('turfington_current_profile');
+    localStorage.removeItem('turfington_user');
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('turfington_auth_user');
   };
 
 
@@ -339,7 +344,7 @@ export default function App() {
     ? [
         { id: 'landing',      label: 'Home' },
         { id: 'sports-feed',  label: 'Feed' },
-        { id: 'community',    label: 'Community' },
+        { id: 'community',    label: 'Messages' },
         { id: 'tournaments',  label: 'Tournaments' },
         { id: 'marketplace',  label: 'Marketplace' },
         { id: 'venue-manager', label: 'My Venues', badge: 'Owner' },
@@ -350,7 +355,7 @@ export default function App() {
         { id: 'landing',      label: 'Home' },
         { id: 'discovery',    label: 'Discover' },
         { id: 'sports-feed',  label: 'Feed' },
-        { id: 'community',    label: 'Community' },
+        { id: 'community',    label: 'Messages' },
         { id: 'tournaments',  label: 'Tournaments' },
         { id: 'marketplace',  label: 'Marketplace' },
         { id: 'dashboard',    label: 'Your Bookings' },
@@ -632,15 +637,18 @@ export default function App() {
       <div className="xl:hidden fixed bottom-6 left-4 right-4 z-40 flex items-center justify-around py-3 px-4 glass-card border border-white/10 shadow-2xl">
         {(isOwner
           ? [
-              { id: 'sports-feed',  Icon: Compass,         label: 'Feed' },
-              { id: 'tournaments',  Icon: Trophy,          label: 'Events' },
-              { id: 'marketplace',  Icon: ShoppingBag,     label: 'Shop' },
+              { id: 'landing',      Icon: HomeIcon,        label: 'Home' },
               { id: 'venue-manager', Icon: Building2,      label: 'Venues' },
+              { id: 'community',    Icon: MessageSquare,   label: 'Messages' },
+              { id: 'sports-feed',  Icon: Flame,           label: 'Feed' },
+              { id: 'tournaments',  Icon: Trophy,          label: 'Events' },
               { id: 'dashboard',    Icon: LayoutDashboard, label: 'Bookings' },
+              { id: 'profile',      Icon: User,            label: 'Profile' },
             ]
           : [
               { id: 'landing',     Icon: HomeIcon,        label: 'Home' },
               { id: 'discovery',   Icon: Compass,         label: 'Discover' },
+              { id: 'community',   Icon: MessageSquare,   label: 'Messages' },
               { id: 'sports-feed', Icon: Flame,           label: 'Feed' },
               { id: 'tournaments', Icon: Trophy,          label: 'Events' },
               { id: 'profile',     Icon: User,            label: 'Profile' },

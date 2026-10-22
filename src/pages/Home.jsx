@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, Users, Clock, Award, Star, Calendar, MessageSquare, Heart, Share2, Compass, Plus, Flame } from 'lucide-react';
-import { apiCreateDirectChat, apiSubscribeVenues } from '../services/db';
+import { apiCreateDirectChat, apiSubscribeVenues, apiFetchHostedMatches, apiJoinHostedMatch, apiLeaveHostedMatch } from '../services/db';
 
 export default function Home({ 
   setTab, 
@@ -79,6 +79,62 @@ export default function Home({
       isLive: false
     }
   ]);
+
+  // Load and sync open matches hosted across the app
+  useEffect(() => {
+    const syncHostedSessions = async () => {
+      try {
+        const hosted = await apiFetchHostedMatches();
+        if (Array.isArray(hosted) && hosted.length > 0) {
+          const mappedHosted = hosted.map(m => ({
+            id: m.id,
+            title: m.title || `${m.sport} at ${m.venue}`,
+            venue: m.venue,
+            sport: m.sport || 'Sports',
+            image: m.image || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=600',
+            distance: m.distance || '1.1 km away',
+            time: m.time || 'Upcoming Slot',
+            playersJoined: m.players_joined || 1,
+            playersTotal: m.players_total || m.capacity || 10,
+            skillLevel: m.skill_level || 'All Levels',
+            hostName: m.host_name || 'Match Host',
+            hostAvatar: m.host_avatar,
+            hostId: m.host_id,
+            isLive: true,
+            isHosted: true,
+            price: m.price
+          }));
+
+          setSessions(prev => {
+            const seen = new Set();
+            const combined = [...mappedHosted, ...prev].filter(item => {
+              if (seen.has(item.id)) return false;
+              seen.add(item.id);
+              return true;
+            });
+            return combined;
+          });
+        }
+      } catch {}
+    };
+
+    syncHostedSessions();
+    window.addEventListener('turfington_hosted_matches_updated', syncHostedSessions);
+    return () => window.removeEventListener('turfington_hosted_matches_updated', syncHostedSessions);
+  }, []);
+
+  const handleJoinHostedMatchClick = async (session) => {
+    const isAlreadyJoined = joinedMatches.includes(session.id);
+    if (isAlreadyJoined) {
+      await apiLeaveHostedMatch(session.id, user?.id || 'usr_curr');
+      toggleJoinMatch(session.id);
+      setSessions(prev => prev.map(s => s.id === session.id ? { ...s, playersJoined: Math.max(1, (s.playersJoined || 1) - 1) } : s));
+    } else {
+      await apiJoinHostedMatch(session.id, user);
+      toggleJoinMatch(session.id);
+      setSessions(prev => prev.map(s => s.id === session.id ? { ...s, playersJoined: Math.min(s.playersTotal, (s.playersJoined || 0) + 1) } : s));
+    }
+  };
 
   const [venues, setVenues] = useState([
     {
@@ -372,6 +428,13 @@ export default function Home({
 
                         <h3 className="font-display font-bold text-white text-base truncate">{s.title}</h3>
                         
+                        {s.hostName && (
+                          <div className="flex items-center space-x-1.5 text-[10px] text-neutral-300 bg-white/5 border border-white/10 px-2 py-0.5 rounded-full mt-1.5 self-start">
+                            <Users className="w-3 h-3 text-neutral-400" />
+                            <span>Hosted by <strong className="text-white font-medium">{s.hostName}</strong></span>
+                          </div>
+                        )}
+
                         <div className="space-y-1.5 mt-3">
                           <div className="flex items-center text-xs text-neutral-400">
                             <MapPin className="w-3.5 h-3.5 mr-1.5 text-neutral-500" />
@@ -384,6 +447,9 @@ export default function Home({
                           <div className="flex items-center text-xs text-neutral-400">
                             <Users className="w-3.5 h-3.5 mr-1.5 text-neutral-500" />
                             <span>{joined ? s.playersJoined + 1 : s.playersJoined}/{s.playersTotal} Joined</span>
+                            <span className="ml-1 text-[10px] text-neutral-400 font-mono">
+                              ({Math.max(0, s.playersTotal - (joined ? s.playersJoined + 1 : s.playersJoined))} spots left)
+                            </span>
                           </div>
                         </div>
 
@@ -392,7 +458,28 @@ export default function Home({
                             {s.skillLevel}
                           </span>
                           
-                          {reqStatus === 'approved' ? (
+                          {s.isHosted ? (
+                            joinedMatches.includes(s.id) ? (
+                              <button
+                                onClick={() => handleJoinHostedMatchClick(s)}
+                                className="text-xs font-bold px-3.5 py-1.5 rounded-full border border-white/20 bg-white/10 text-white hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/30 transition-all cursor-pointer shadow-sm"
+                                title="Click to leave hosted match"
+                              >
+                                ✓ Joined (Leave)
+                              </button>
+                            ) : s.playersJoined >= s.playersTotal ? (
+                              <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-neutral-800 text-neutral-500">
+                                Squad Full
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleJoinHostedMatchClick(s)}
+                                className="text-xs font-bold px-4 py-1.5 rounded-full bg-white text-black hover:bg-neutral-200 transition-all cursor-pointer shadow-md"
+                              >
+                                Join Match
+                              </button>
+                            )
+                          ) : reqStatus === 'approved' ? (
                             <button
                               onClick={() => onRequestCancelMatch ? onRequestCancelMatch(s) : toggleJoinMatch(s.id)}
                               className="text-xs font-extrabold px-3.5 py-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/40 transition-all cursor-pointer shadow-sm"

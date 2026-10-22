@@ -9,9 +9,21 @@ import {
 } from 'lucide-react';
 import SportIcon from '../components/SportIcon';
 import VenueImage from '../components/VenueImage';
-import { apiFetchTurfs, apiFetchNearbyTurfs, apiCreateBooking, apiFetchNearbyPlayers, apiSearchUsers, apiFollowUser, apiCreateDirectChat, apiSubscribeVenues } from '../services/db';
+import { apiFetchTurfs, apiFetchNearbyTurfs, apiCreateBooking, apiFetchNearbyPlayers, apiSearchUsers, apiFollowUser, apiCreateDirectChat, apiSubscribeVenues, apiCreateHostedMatch, apiFetchHostedMatches, apiJoinHostedMatch, apiLeaveHostedMatch } from '../services/db';
 import { openRazorpayCheckout } from '../services/razorpay';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
+
+/* ── Sport Capacity Presets & Rules ──────────────────────── */
+export const SPORT_CAPACITY_PRESETS = [
+  { sport: 'Badminton', label: 'Badminton (4)', defaultCap: 4, icon: '🏸', note: 'Standard Doubles (4 players) or Singles (2)' },
+  { sport: 'Cricket', label: 'Cricket (11)', defaultCap: 11, icon: '🏏', note: 'Single Squad (11 players) or Full Match (22)' },
+  { sport: 'Kabaddi', label: 'Kabaddi (14)', defaultCap: 14, icon: '🤼', note: 'Standard 7v7 Team Squad (14 players)' },
+  { sport: 'Football', label: 'Football (10)', defaultCap: 10, icon: '⚽', note: '5v5 Futsal (10) or 7v7 Turf (14)' },
+  { sport: 'Basketball', label: 'Basketball (10)', defaultCap: 10, icon: '🏀', note: '5v5 Full Court (10 players)' },
+  { sport: 'Volleyball', label: 'Volleyball (12)', defaultCap: 12, icon: '🏐', note: 'Standard 6v6 Match (12 players)' },
+  { sport: 'Table Tennis', label: 'Table Tennis (4)', defaultCap: 4, icon: '🏓', note: 'Doubles (4 players) or Singles (2)' },
+  { sport: 'Pickleball', label: 'Pickleball (4)', defaultCap: 4, icon: '🥒', note: 'Doubles Match (4 players)' },
+];
 
 /* ── Haversine distance (km) ─────────────────────────────── */
 function haversine(lat1, lng1, lat2, lng2) {
@@ -54,17 +66,65 @@ export default function Discovery({
   });
   const [chosenSlot, setChosenSlot] = useState(null);
   const [bookingType, setBookingType] = useState('private');
-  const [myExistingCount, setMyExistingCount] = useState(5);
+  const [myExistingCount, setMyExistingCount] = useState(2);
+  const [hostCapacity, setHostCapacity] = useState(10);
+  const [selectedSportPreset, setSelectedSportPreset] = useState('Football');
+  const [hostingSkillLevel, setHostingSkillLevel] = useState('All Levels Welcome');
+  const [hostedMatchesList, setHostedMatchesList] = useState([]);
 
-  // Auto-select Today's date whenever a player opens slot booking for a venue
+  // Auto-detect sport preset and auto-select date when user opens turf slot picker
   useEffect(() => {
     if (selectedSlotTurf) {
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       const todayShort = dayNames[new Date().getDay()];
       setSlotDateTab(todayShort);
       setChosenSlot(null);
+
+      const sName = String(selectedSlotTurf.sport || selectedSlotTurf.category || '').toLowerCase();
+      let defaultCap = 10;
+      let matchedSport = 'Football';
+      if (sName.includes('badminton')) {
+        defaultCap = 4;
+        matchedSport = 'Badminton';
+      } else if (sName.includes('cricket')) {
+        defaultCap = 11;
+        matchedSport = 'Cricket';
+      } else if (sName.includes('kabaddi')) {
+        defaultCap = 14;
+        matchedSport = 'Kabaddi';
+      } else if (sName.includes('volleyball')) {
+        defaultCap = 12;
+        matchedSport = 'Volleyball';
+      } else if (sName.includes('table tennis') || sName.includes('tt')) {
+        defaultCap = 4;
+        matchedSport = 'Table Tennis';
+      } else if (sName.includes('pickleball')) {
+        defaultCap = 4;
+        matchedSport = 'Pickleball';
+      } else if (sName.includes('basketball')) {
+        defaultCap = 10;
+        matchedSport = 'Basketball';
+      } else if (sName.includes('football')) {
+        defaultCap = 10;
+        matchedSport = 'Football';
+      }
+      setHostCapacity(defaultCap);
+      setSelectedSportPreset(matchedSport);
+      setMyExistingCount(Math.max(1, Math.min(defaultCap - 1, Math.floor(defaultCap / 2))));
     }
   }, [selectedSlotTurf]);
+
+  // Sync hosted matches across the app
+  useEffect(() => {
+    const syncHosted = () => {
+      apiFetchHostedMatches().then(list => {
+        if (Array.isArray(list)) setHostedMatchesList(list);
+      });
+    };
+    syncHosted();
+    window.addEventListener('turfington_hosted_matches_updated', syncHosted);
+    return () => window.removeEventListener('turfington_hosted_matches_updated', syncHosted);
+  }, []);
 
   const getBookingDays = () => {
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -93,8 +153,9 @@ export default function Discovery({
       '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
     ];
 
-    const rawMap = turf?.slots?.[dayShort] || {};
-    
+    const sName = String(turf?.sport || turf?.category || '').toLowerCase();
+    const defaultSportCap = sName.includes('badminton') ? 4 : sName.includes('cricket') ? 11 : sName.includes('kabaddi') ? 14 : (turf?.defaultCapacity || 10);
+
     const slots = times.map((t, idx) => {
       let rawStatus = rawMap[t] || 'available';
       
@@ -103,13 +164,36 @@ export default function Discovery({
         rawStatus = 'booked';
       }
 
+      // Check if there is an active hosted match for this venue & slot
+      const matchedHosted = hostedMatchesList.find(m => 
+        (String(m.turf_id) === String(turf?.id) || m.venue === (turf?.venue || turf?.name)) &&
+        (m.slot_id === `slot_${turf?.id || 1}_${dayShort}_${t}` || (m.time && m.time.includes(t)))
+      );
+
+      const statusVal = matchedHosted
+        ? (matchedHosted.players_joined >= matchedHosted.players_total ? 'booked' : 'open_match')
+        : (typeof rawStatus === 'object' ? rawStatus.status : rawStatus);
+      const capVal = matchedHosted
+        ? matchedHosted.players_total
+        : (typeof rawStatus === 'object' ? (rawStatus.capacity || defaultSportCap) : (rawMap[`${t}_cap`] || defaultSportCap));
+      const currentVal = matchedHosted
+        ? matchedHosted.players_joined
+        : (typeof rawStatus === 'object' ? (rawStatus.currentPlayers || 1) : 0);
+      const hostVal = matchedHosted
+        ? matchedHosted.host_name
+        : (typeof rawStatus === 'object' ? rawStatus.hostName : null);
+
       return {
         id: `slot_${turf?.id || 1}_${dayShort}_${t}`,
         time: t,
-        status: rawStatus,
-        capacity: 10,
+        status: statusVal,
+        capacity: capVal,
+        currentPlayers: currentVal,
+        neededPlayers: Math.max(0, capVal - currentVal),
+        hostName: hostVal,
+        sport: matchedHosted ? matchedHosted.sport : (turf?.sport || 'Sports'),
         price: parseFloat(String(turf?.price || turf?.price_per_hr || 600).replace(/[^\d.]/g, '')) || 600,
-        bookedBy: rawStatus === 'booked' ? 'Booked' : null
+        bookedBy: statusVal === 'booked' ? (matchedHosted ? 'Full Squad' : 'Booked') : hostVal
       };
     });
 
@@ -299,8 +383,31 @@ export default function Discovery({
     { id: 3, name: 'VR Mall Bowlers Club', members: '120 members', online: 8, image: 'https://images.unsplash.com/photo-1541252260730-0412e8e2108e?w=300', category: 'Bowling' }
   ];
 
-  // Filtered Activities
-  const filteredActivities = activities.filter(act => {
+  // Filtered Activities (combines standard venues and active hosted matches)
+  const combinedActivitiesList = [
+    ...hostedMatchesList.map(m => ({
+      id: m.id,
+      title: m.title || `${m.sport} at ${m.venue}`,
+      sport: m.sport || 'Sports',
+      venue: m.venue,
+      lat: m.lat || 13.0827,
+      lng: m.lng || 80.2707,
+      time: m.time || 'Upcoming Slot',
+      slots: 'Open Match Session',
+      joined: m.players_joined || 1,
+      total: m.players_total || m.capacity || 10,
+      skill: m.skill_level || 'All Levels',
+      price: m.price || `₹${m.price_per_player || 150}/player`,
+      rating: 5.0,
+      image: m.image || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=600',
+      isHosted: true,
+      hostName: m.host_name,
+      hostAvatar: m.host_avatar
+    })),
+    ...activities
+  ];
+
+  const filteredActivities = combinedActivitiesList.filter(act => {
     if (selectedSport !== 'All' && act.sport !== selectedSport) return false;
     if (selectedSkill !== 'All' && act.skill !== selectedSkill) return false;
     if (searchQuery && !act.title.toLowerCase().includes(searchQuery.toLowerCase()) && !act.venue.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -386,10 +493,11 @@ export default function Discovery({
     if (!slot || !selectedSlotTurf) return;
 
     const slotTimeStr = slot.time || '06:00';
+    const effectiveCapacity = bookingType === 'open_match' ? hostCapacity : (slot.capacity || 10);
     const venueBookingPayload = {
       id: selectedSlotTurf.id,
       venue: selectedSlotTurf.venue || selectedSlotTurf.title || selectedSlotTurf.name,
-      sport: selectedSlotTurf.sport || 'Sports',
+      sport: bookingType === 'open_match' ? selectedSportPreset : (selectedSlotTurf.sport || 'Sports'),
       time: `${slotDateTab}, ${slotTimeStr}`,
       price: `₹${slot.price || 600}`,
       image: selectedSlotTurf.image || selectedSlotTurf.image_url,
@@ -398,9 +506,12 @@ export default function Discovery({
         dateKey: slotDateTab,
         slotId: slot.id || slotTimeStr,
         bookingType,
-        myExistingCount,
-        capacity: slot.capacity || 10,
-        currentStatus: slot.status
+        myExistingCount: bookingType === 'open_match' ? myExistingCount : 1,
+        capacity: effectiveCapacity,
+        sportPreset: selectedSportPreset,
+        skillLevel: hostingSkillLevel,
+        currentStatus: slot.status,
+        hostName: slot.hostName
       }
     };
 
@@ -424,15 +535,15 @@ export default function Discovery({
     setIsPaying(true);
 
     if (activePrepaidVenue.slotMeta) {
-      const { turfId, dateKey, slotId, bookingType, myExistingCount, capacity, currentStatus } = activePrepaidVenue.slotMeta;
+      const { turfId, dateKey, slotId, bookingType, myExistingCount, capacity, currentStatus, sportPreset, skillLevel } = activePrepaidVenue.slotMeta;
       updateSlotState(turfId, dateKey, slotId, (s) => {
         if (currentStatus === 'open_match') {
-          const newCount = (s.currentPlayers || 5) + 1;
-          const isFull = newCount >= (s.capacity || 10);
+          const newCount = (s.currentPlayers || 1) + 1;
+          const isFull = newCount >= (s.capacity || capacity || 10);
           return {
             ...s,
             currentPlayers: newCount,
-            neededPlayers: Math.max(0, (s.capacity || 10) - newCount),
+            neededPlayers: Math.max(0, (s.capacity || capacity || 10) - newCount),
             status: isFull ? 'booked' : 'open_match',
             bookedBy: isFull ? 'Full Squad' : s.bookedBy
           };
@@ -440,9 +551,11 @@ export default function Discovery({
           return {
             ...s,
             status: 'open_match',
+            capacity: capacity,
             currentPlayers: myExistingCount,
-            neededPlayers: capacity - myExistingCount,
-            hostName: user?.full_name || 'You'
+            neededPlayers: Math.max(0, capacity - myExistingCount),
+            hostName: user?.full_name || 'You',
+            sport: sportPreset || activePrepaidVenue.sport
           };
         } else {
           return {
@@ -452,6 +565,35 @@ export default function Discovery({
           };
         }
       });
+
+      // If hosting an open match, publish immediately to shared feed so other players can join
+      if (bookingType === 'open_match') {
+        const targetSport = sportPreset || activePrepaidVenue.sport || 'Sports';
+        const targetVenueName = activePrepaidVenue.venue || activePrepaidVenue.name;
+        const totalPriceNum = parseFloat(String(activePrepaidVenue.price).replace(/[^\d.]/g, '')) || 600;
+        const splitPrice = Math.round(totalPriceNum / capacity);
+
+        apiCreateHostedMatch({
+          turf_id: turfId,
+          venue: targetVenueName,
+          sport: targetSport,
+          time: activePrepaidVenue.time,
+          date: dateKey,
+          slot_id: slotId,
+          capacity: capacity,
+          existing_players_count: myExistingCount,
+          host_id: user?.id || user?.firebase_uid || 'usr_curr',
+          host_name: user?.full_name || user?.name || 'You',
+          host_avatar: user?.avatar_url || user?.avatar,
+          skill_level: skillLevel || 'All Levels Welcome',
+          total_price: totalPriceNum,
+          price_per_player: splitPrice,
+          image: activePrepaidVenue.image
+        });
+      } else if (currentStatus === 'open_match') {
+        // Player joins hosted match
+        apiJoinHostedMatch(slotId, user);
+      }
     }
 
     const newBooking = {
@@ -1062,7 +1204,48 @@ export default function Discovery({
                               </div>
                             ) : (
                               <div className="flex space-x-2 pt-1">
-                                {reqStatus === 'approved' ? (
+                                {act.isHosted ? (
+                                  (() => {
+                                    const isJoinedHosted = joined || (Array.isArray(act.participants) && act.participants.some(p => (p.user_id === user?.id || p.user_id === user?.firebase_uid || p.user_name === (user?.name || user?.full_name))));
+                                    const isFull = (act.players_joined || act.joined || 0) >= (act.players_total || act.total || 10);
+                                    if (isJoinedHosted) {
+                                      return (
+                                        <button
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            await apiLeaveHostedMatch(act.id, user?.id || user?.firebase_uid);
+                                            toggleJoinMatch(act.id);
+                                          }}
+                                          className="flex-grow text-xs font-bold py-2.5 rounded-full border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 hover:bg-rose-500/20 hover:text-rose-300 transition-all cursor-pointer shadow-sm"
+                                        >
+                                          ✓ Joined (Leave)
+                                        </button>
+                                      );
+                                    }
+                                    if (isFull) {
+                                      return (
+                                        <button
+                                          disabled
+                                          className="flex-grow text-xs font-bold py-2.5 rounded-full bg-neutral-800 text-neutral-500 border border-white/5 cursor-not-allowed"
+                                        >
+                                          Squad Full
+                                        </button>
+                                      );
+                                    }
+                                    return (
+                                      <button
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          await apiJoinHostedMatch(act.id, user);
+                                          toggleJoinMatch(act.id);
+                                        }}
+                                        className="flex-grow text-xs font-bold py-2.5 rounded-full bg-white text-black hover:bg-neutral-200 transition-all cursor-pointer shadow-md"
+                                      >
+                                        Join Match
+                                      </button>
+                                    );
+                                  })()
+                                ) : reqStatus === 'approved' ? (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -1564,28 +1747,117 @@ export default function Discovery({
                         </button>
                       </div>
 
-                      {/* If Host Open Match selected, choose current vs needed players */}
+                      {/* If Host Open Match selected, choose sport presets and dynamic player capacity */}
                       {bookingType === 'open_match' && (
-                        <div className="p-4 bg-amber-500/10 border border-amber-500/25 rounded-xl space-y-3">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-bold text-amber-300">How many players do you currently have?</span>
-                            <span className="font-extrabold text-white">{myExistingCount} / {chosenSlot.capacity} Players</span>
+                        <div className="space-y-3.5 pt-1">
+                          {/* 1. Sport Presets */}
+                          <div>
+                            <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold block mb-2">
+                              Sport & Squad Requirements
+                            </label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              {SPORT_CAPACITY_PRESETS.map((p) => {
+                                const isSel = selectedSportPreset === p.sport && hostCapacity === p.defaultCap;
+                                return (
+                                  <button
+                                    key={p.sport}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedSportPreset(p.sport);
+                                      setHostCapacity(p.defaultCap);
+                                      setMyExistingCount(Math.max(1, Math.min(p.defaultCap - 1, Math.floor(p.defaultCap / 2))));
+                                    }}
+                                    className={`p-2 rounded-xl border text-xs font-medium flex items-center justify-between transition-all cursor-pointer ${
+                                      isSel
+                                        ? 'bg-white text-black border-white shadow-sm'
+                                        : 'bg-white/[0.03] border-white/10 text-neutral-300 hover:border-white/20 hover:text-white'
+                                    }`}
+                                  >
+                                    <span className="flex items-center gap-1.5 truncate">
+                                      <span>{p.icon}</span>
+                                      <span className="truncate">{p.sport}</span>
+                                    </span>
+                                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${isSel ? 'bg-black/10 text-black font-bold' : 'bg-white/10 text-neutral-400'}`}>
+                                      {p.defaultCap}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
 
-                          <div className="flex items-center space-x-2">
-                            <input 
-                              type="range"
-                              min="1"
-                              max={chosenSlot.capacity - 1}
-                              value={myExistingCount}
-                              onChange={(e) => setMyExistingCount(parseInt(e.target.value))}
-                              className="w-full accent-amber-400 cursor-pointer"
-                            />
-                          </div>
+                          {/* 2. Squad Capacity & Players with You Stepper */}
+                          <div className="p-4 rounded-2xl bg-neutral-900/80 border border-white/10 space-y-3 text-left">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <span className="text-xs font-bold text-white block">Total Players Needed (Capacity)</span>
+                                <span className="text-[10px] text-neutral-400 font-light block mt-0.5">
+                                  {selectedSportPreset === 'Badminton' ? '🏸 Badminton: 4 players for doubles (2v2) or 2 for singles' :
+                                   selectedSportPreset === 'Cricket' ? '🏏 Cricket: 11 squad players or 22 for full 11v11 match' :
+                                   selectedSportPreset === 'Kabaddi' ? '🤼 Kabaddi: 14 players required (7v7 match squad)' :
+                                   selectedSportPreset === 'Football' ? '⚽ Football: 10 players for 5v5 or 14 for 7v7 turf' :
+                                   `${selectedSportPreset}: Select squad size needed for this match`}
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-1.5 bg-black/60 border border-white/10 rounded-xl p-1 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = Math.max(2, hostCapacity - 1);
+                                    setHostCapacity(next);
+                                    if (myExistingCount >= next) setMyExistingCount(next - 1);
+                                  }}
+                                  className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/15 text-white flex items-center justify-center font-bold text-sm cursor-pointer"
+                                >
+                                  −
+                                </button>
+                                <span className="w-8 text-center font-mono font-bold text-sm text-white">{hostCapacity}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = Math.min(32, hostCapacity + 1);
+                                    setHostCapacity(next);
+                                  }}
+                                  className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/15 text-white flex items-center justify-center font-bold text-sm cursor-pointer"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
 
-                          <div className="p-2.5 bg-black/40 rounded-lg flex items-center justify-between text-xs">
-                            <span className="text-neutral-400">Open Spots for Other Players:</span>
-                            <span className="font-black text-amber-400">{chosenSlot.capacity - myExistingCount} Players Needed</span>
+                            {/* Stepper for players host already has */}
+                            <div className="flex items-center justify-between pt-2.5 border-t border-white/5 text-xs">
+                              <span className="text-neutral-300">Players you already have with you:</span>
+                              <div className="flex items-center space-x-1.5 bg-black/60 border border-white/10 rounded-xl p-1 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => setMyExistingCount(Math.max(1, myExistingCount - 1))}
+                                  className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/15 text-white flex items-center justify-center font-bold text-xs cursor-pointer"
+                                >
+                                  −
+                                </button>
+                                <span className="w-7 text-center font-mono font-semibold text-xs text-white">{myExistingCount}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setMyExistingCount(Math.min(hostCapacity - 1, myExistingCount + 1))}
+                                  className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/15 text-white flex items-center justify-center font-bold text-xs cursor-pointer"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Open spots & split summary */}
+                            <div className="grid grid-cols-2 gap-2 pt-1 text-left">
+                              <div className="p-2.5 bg-white/[0.02] border border-white/5 rounded-xl">
+                                <span className="text-[10px] text-neutral-400 block font-medium">Spots for Others:</span>
+                                <span className="text-xs font-bold text-neutral-200 mt-0.5 block">{hostCapacity - myExistingCount} Players Needed</span>
+                              </div>
+                              <div className="p-2.5 bg-white/[0.02] border border-white/5 rounded-xl">
+                                <span className="text-[10px] text-neutral-400 block font-medium">Per Player Split:</span>
+                                <span className="text-xs font-bold text-neutral-200 mt-0.5 block">₹{Math.round(chosenSlot.price / hostCapacity)} / player</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -1594,13 +1866,17 @@ export default function Discovery({
 
                   {/* Joining an Open Match Session */}
                   {chosenSlot.status === 'open_match' && (
-                    <div className="p-4 bg-amber-500/10 border border-amber-500/25 rounded-xl space-y-2 text-xs">
-                      <div className="flex justify-between font-bold">
-                        <span className="text-amber-300">Open Match Session Hosted by {chosenSlot.hostName}</span>
-                        <span className="text-white">{chosenSlot.currentPlayers}/{chosenSlot.capacity} Joined</span>
+                    <div className="p-4 bg-neutral-900/80 border border-white/10 rounded-2xl space-y-2 text-xs text-left">
+                      <div className="flex justify-between items-center font-bold">
+                        <span className="text-white flex items-center gap-1.5">
+                          <span>👥</span> Open Match Hosted by {chosenSlot.hostName || 'Fellow Athlete'}
+                        </span>
+                        <span className="text-neutral-300 font-mono text-[11px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10">
+                          {chosenSlot.currentPlayers || 1}/{chosenSlot.capacity || 10} Joined
+                        </span>
                       </div>
-                      <p className="text-neutral-300 font-light">
-                        {chosenSlot.neededPlayers || (chosenSlot.capacity - chosenSlot.currentPlayers)} more players needed. Join this session to complete the team!
+                      <p className="text-neutral-400 font-light text-[11px]">
+                        {chosenSlot.neededPlayers || ((chosenSlot.capacity || 10) - (chosenSlot.currentPlayers || 1))} more players needed to complete squad. Other players can join instantly!
                       </p>
                     </div>
                   )}
@@ -1608,19 +1884,19 @@ export default function Discovery({
                   {/* Proceed to Payment Action Button */}
                   <button
                     onClick={() => handleConfirmSlotBooking(chosenSlot)}
-                    className={`w-full py-4 rounded-full font-black text-xs uppercase tracking-widest transition-all cursor-pointer shadow-lg flex items-center justify-center space-x-2 ${
+                    className={`w-full py-4 rounded-full font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg flex items-center justify-center space-x-2 ${
                       chosenSlot.status === 'open_match'
-                        ? 'bg-amber-400 hover:bg-amber-300 text-black shadow-amber-500/20'
+                        ? 'bg-white text-black hover:bg-neutral-200 shadow-md'
                         : bookingType === 'open_match'
-                        ? 'bg-amber-400 hover:bg-amber-300 text-black shadow-amber-500/20'
+                        ? 'bg-white text-black hover:bg-neutral-200 shadow-md'
                         : 'bg-[#5842fe] hover:bg-[#4832ee] text-white shadow-[0_0_20px_rgba(88,66,254,0.35)]'
                     }`}
                   >
                     <span>
                       {chosenSlot.status === 'open_match'
-                        ? `Join Match & Pay Split (₹${Math.round(chosenSlot.price / chosenSlot.capacity)})`
+                        ? `Join Match & Pay Split (₹${Math.round(chosenSlot.price / (chosenSlot.capacity || 10))})`
                         : bookingType === 'open_match'
-                        ? `Host Match (${chosenSlot.capacity - myExistingCount} Spots Open) & Pay Deposit (₹${chosenSlot.price})`
+                        ? `Host Match (${hostCapacity - myExistingCount} Spots Open) • Pay at Venue (₹${chosenSlot.price})`
                         : `Book ${chosenSlot.time} (₹${chosenSlot.price})`}
                     </span>
                     <ChevronRight className="w-4 h-4" />
