@@ -241,15 +241,31 @@ export async function apiCreateProfile(profileData) {
     body: JSON.stringify(profileToSave)
   }).catch(() => {});
 
-  // Persist to Firestore
+  // Persist to Firestore (both profiles and users collections)
   try {
     const userRef = doc(db, 'profiles', profileId);
     await setDoc(userRef, {
       ...profileToSave,
       updatedAt: serverTimestamp()
     }, { merge: true });
+
+    const rootUserRef = doc(db, 'users', profileId);
+    await setDoc(rootUserRef, {
+      uid: profileId,
+      id: profileId,
+      displayName: profileToSave.full_name || profileToSave.name || 'Athlete',
+      name: profileToSave.full_name || profileToSave.name || 'Athlete',
+      email: profileToSave.email || '',
+      avatarUrl: profileToSave.avatar || profileToSave.avatar_url || '',
+      role: profileToSave.role || 'player',
+      sport: profileToSave.sport || 'Football',
+      location: profileToSave.location || 'Chennai, India',
+      auth_provider: profileToSave.auth_provider || (profileToSave.email?.includes('gmail') ? 'google' : 'email'),
+      is_google_user: !!(profileToSave.auth_provider === 'google' || profileToSave.is_google_user || profileToSave.email?.includes('gmail') || profileToSave.avatar?.includes('googleusercontent')),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
   } catch (err) {
-    console.error('Firestore apiCreateProfile error:', err);
+    console.warn('Firestore apiCreateProfile error:', err);
   }
 
   setLocalProfile(profileToSave);
@@ -279,13 +295,19 @@ export async function apiUpdateProfile(profileId, updates) {
     body: JSON.stringify(updatedProfile)
   }).catch(() => {});
 
-  // Firestore update
+  // Firestore update (both profiles and users collections)
   try {
     const userRef = doc(db, 'profiles', profileId);
     setDoc(userRef, {
       ...updates,
       updatedAt: serverTimestamp()
     }, { merge: true }).catch(err => console.warn('Firestore apiUpdateProfile warning:', err));
+
+    const rootUserRef = doc(db, 'users', profileId);
+    setDoc(rootUserRef, {
+      ...updates,
+      updatedAt: serverTimestamp()
+    }, { merge: true }).catch(() => {});
   } catch (e) {}
 
   return { success: true, data: updatedProfile };
@@ -1600,46 +1622,179 @@ export async function apiMarkMessagesAsRead(conversationId, userId) {
 export async function apiFetchAthletes(currentUserId) {
   try {
     const list = [];
+    const seenMap = new Map();
+
+    const addOrUpdateUser = (userData) => {
+      if (!userData) return;
+      const uid = userData.firebase_uid || userData.id || userData.uid;
+      const email = (userData.email || '').toLowerCase().trim();
+      const lookupKey = uid || email;
+      if (!lookupKey) return;
+
+      const isGoogle = !!(
+        userData.auth_provider === 'google' ||
+        userData.is_google_user ||
+        (email && email.endsWith('@gmail.com')) ||
+        (userData.avatar && userData.avatar.includes('googleusercontent.com')) ||
+        (userData.avatarUrl && userData.avatarUrl.includes('googleusercontent.com')) ||
+        (userData.avatar_url && userData.avatar_url.includes('googleusercontent.com'))
+      );
+
+      const normalized = {
+        id: uid,
+        uid: uid,
+        firebase_uid: uid,
+        name: userData.full_name || userData.displayName || userData.name || (email ? email.split('@')[0] : 'Athlete'),
+        full_name: userData.full_name || userData.displayName || userData.name || (email ? email.split('@')[0] : 'Athlete'),
+        displayName: userData.displayName || userData.full_name || userData.name || 'Athlete',
+        email: email,
+        avatar: userData.avatar || userData.avatarUrl || userData.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`,
+        avatarUrl: userData.avatarUrl || userData.avatar || userData.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`,
+        role: userData.role || 'player',
+        sport: userData.sport || (Array.isArray(userData.sports_interests) ? userData.sports_interests[0] : 'Multi-Sport'),
+        location: userData.location || 'Chennai, India',
+        auth_provider: isGoogle ? 'google' : (userData.auth_provider || 'email'),
+        is_google_user: isGoogle,
+        lastActive: userData.updatedAt || userData.updated_at || new Date().toISOString()
+      };
+
+      if (seenMap.has(lookupKey)) {
+        const existing = seenMap.get(lookupKey);
+        seenMap.set(lookupKey, { ...existing, ...normalized, is_google_user: existing.is_google_user || isGoogle });
+      } else {
+        seenMap.set(lookupKey, normalized);
+      }
+    };
     
-    // 1. Fetch from Firestore profiles
+    // 1. Fetch from Firestore profiles collection
     try {
-      const snap = await getDocs(collection(db, 'profiles'));
-      snap.docs.forEach(d => list.push({ id: d.id, ...d.data() }));
+      const snapProfiles = await getDocs(collection(db, 'profiles'));
+      snapProfiles.docs.forEach(d => addOrUpdateUser({ id: d.id, ...d.data() }));
     } catch (e) {}
 
-    // 2. Fetch from Express backend
+    // 2. Fetch from Firestore users collection
+    try {
+      const snapUsers = await getDocs(collection(db, 'users'));
+      snapUsers.docs.forEach(d => addOrUpdateUser({ id: d.id, ...d.data() }));
+    } catch (e) {}
+
+    // 3. Fetch from Express backend
     try {
       const res = await fetch('http://localhost:5000/api/users');
       if (res.ok) {
-        const users = await res.json();
-        users.forEach(u => {
-          if (!list.some(item => item.id === u.id || item.email === u.email)) {
-            list.push(u);
-          }
-        });
+        const data = await res.json();
+        const users = Array.isArray(data) ? data : (data.users || []);
+        users.forEach(u => addOrUpdateUser(u));
       }
     } catch {}
 
-    // Default athletes for instant discovery & direct messaging
+    // 4. Aggregate accounts saved in localStorage (from ProfileSwitcher & device auth)
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        // Multi-accounts map
+        const rawAccounts = localStorage.getItem('turfington_accounts');
+        if (rawAccounts) {
+          const parsed = JSON.parse(rawAccounts);
+          Object.values(parsed).forEach(acc => addOrUpdateUser(acc));
+        }
+
+        // Active saved profiles by owner
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('turfington_saved_profiles') || key === 'turfington_all_profiles')) {
+            try {
+              const items = JSON.parse(localStorage.getItem(key) || '[]');
+              if (Array.isArray(items)) {
+                items.forEach(it => addOrUpdateUser(it));
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+
+    // 5. Default high-quality athletes for instant discovery & direct messaging
     const fallbackAthletes = [
-      { id: 'usr_rahul', name: 'Rahul Sharma', full_name: 'Rahul Sharma', sport: 'Football & Cricket', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Rahul', role: 'player', location: 'Indiranagar' },
-      { id: 'usr_priya', name: 'Priya Sharma', full_name: 'Priya Sharma', sport: 'Badminton & Pickleball', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Priya', role: 'owner', location: 'Porur, Chennai' },
-      { id: 'usr_vikram', name: 'Vikram Rao', full_name: 'Vikram Rao', sport: 'Football', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Vikram', role: 'player', location: 'Anna Nagar, Chennai' },
-      { id: 'usr_sneha', name: 'Sneha Reddy', full_name: 'Sneha Reddy', sport: 'Tennis & Badminton', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sneha', role: 'player', location: 'T. Nagar, Chennai' },
-      { id: 'usr_karthik', name: 'Karthik Subramanian', full_name: 'Karthik Subramanian', sport: 'Box Cricket', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Karthik', role: 'player', location: 'Velachery, Chennai' }
+      { id: 'usr_rahul', name: 'Rahul Sharma', full_name: 'Rahul Sharma', sport: 'Football & Cricket', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Rahul', role: 'player', location: 'Indiranagar', is_google_user: true, auth_provider: 'google', email: 'rahul.athlete@gmail.com' },
+      { id: 'usr_priya', name: 'Priya Sharma', full_name: 'Priya Sharma', sport: 'Badminton & Pickleball', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Priya', role: 'owner', location: 'Porur, Chennai', is_google_user: true, auth_provider: 'google', email: 'priya.turf@gmail.com' },
+      { id: 'usr_vikram', name: 'Vikram Rao', full_name: 'Vikram Rao', sport: 'Football', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Vikram', role: 'player', location: 'Anna Nagar, Chennai', is_google_user: true, auth_provider: 'google', email: 'vikram.striker@gmail.com' },
+      { id: 'usr_sneha', name: 'Sneha Reddy', full_name: 'Sneha Reddy', sport: 'Tennis & Badminton', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sneha', role: 'player', location: 'T. Nagar, Chennai', is_google_user: false, auth_provider: 'email', email: 'sneha.reddy@turfington.com' },
+      { id: 'usr_karthik', name: 'Karthik Subramanian', full_name: 'Karthik Subramanian', sport: 'Box Cricket', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Karthik', role: 'player', location: 'Velachery, Chennai', is_google_user: true, auth_provider: 'google', email: 'karthik.cricket@gmail.com' }
     ];
 
-    fallbackAthletes.forEach(fa => {
-      if (!list.some(item => item.id === fa.id || item.name === fa.name)) {
-        list.push(fa);
-      }
+    fallbackAthletes.forEach(fa => addOrUpdateUser(fa));
+
+    const finalUsers = Array.from(seenMap.values()).filter(u => {
+      const matchId = u.id === currentUserId || u.firebase_uid === currentUserId;
+      return !matchId;
     });
 
-    return list.filter(u => u.id !== currentUserId && u.firebase_uid !== currentUserId);
+    // Prioritize Google-signed-in users first
+    finalUsers.sort((a, b) => {
+      if (a.is_google_user && !b.is_google_user) return -1;
+      if (!a.is_google_user && b.is_google_user) return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+    return finalUsers;
   } catch (e) {
     console.warn('apiFetchAthletes notice:', e);
     return [];
   }
+}
+
+export async function apiSearchGoogleAthletes(searchQuery, currentUserId) {
+  const all = await apiFetchAthletes(currentUserId);
+  if (!searchQuery || !searchQuery.trim()) return all;
+
+  const q = searchQuery.toLowerCase().trim();
+  const filtered = all.filter(u => 
+    (u.name && u.name.toLowerCase().includes(q)) ||
+    (u.full_name && u.full_name.toLowerCase().includes(q)) ||
+    (u.email && u.email.toLowerCase().includes(q)) ||
+    (u.sport && u.sport.toLowerCase().includes(q)) ||
+    (u.location && u.location.toLowerCase().includes(q))
+  );
+
+  // If searching by email and not in the pre-loaded list, attempt live Firestore lookup
+  if (q.includes('@') && !filtered.some(u => (u.email || '').toLowerCase() === q)) {
+    try {
+      const qUsers = query(collection(db, 'users'), where('email', '==', q));
+      const snapUsers = await getDocs(qUsers);
+      if (!snapUsers.empty) {
+        snapUsers.forEach(d => {
+          filtered.push({
+            id: d.id,
+            uid: d.id,
+            firebase_uid: d.id,
+            ...d.data(),
+            auth_provider: 'google',
+            is_google_user: true
+          });
+        });
+      } else {
+        // Direct email invite representation
+        const sanitizedId = 'usr_email_' + q.replace(/[^a-zA-Z0-9]/g, '_');
+        filtered.push({
+          id: sanitizedId,
+          uid: sanitizedId,
+          firebase_uid: sanitizedId,
+          name: q.split('@')[0],
+          full_name: q.split('@')[0],
+          displayName: q.split('@')[0],
+          email: q,
+          auth_provider: 'google',
+          is_google_user: true,
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${q}`,
+          sport: 'Google Athlete',
+          location: 'Direct Recipient',
+          isDirectEmailTarget: true
+        });
+      }
+    } catch {}
+  }
+
+  return filtered;
 }
 
 export async function apiBlockUser(blockerId, blockedId, action = 'block') {

@@ -20,6 +20,7 @@ import {
   apiDeleteUserSavedProfile,
   apiUpdateProfile
 } from '../services/db';
+import { ensureUserProfile } from '../services/chatService';
 import UserAvatar from './UserAvatar';
 
 const SPOTIFY_SPORTS_OPTIONS = [
@@ -172,9 +173,25 @@ export default function ProfileSwitcherModal({
           const completeProfile = {
             ...profile,
             role: finalRole,
+            auth_provider: 'google',
+            is_google_user: true,
             is_profile_complete: true
           };
-          apiUpdateProfile(completeProfile.id, { role: finalRole, is_profile_complete: true }).catch(() => {});
+          apiUpdateProfile(completeProfile.id, { 
+            role: finalRole, 
+            auth_provider: 'google',
+            is_google_user: true,
+            is_profile_complete: true 
+          }).catch(() => {});
+
+          ensureUserProfile({
+            ...completeProfile,
+            uid: result.user.uid,
+            displayName: completeProfile.full_name || completeProfile.name || googleName,
+            email: googleEmail,
+            avatarUrl: completeProfile.avatar || completeProfile.avatar_url || result.user.photoURL
+          }).catch(() => {});
+
           await apiSaveSavedProfile(completeProfile, activeUser?.email || activeUser?.id);
           const updated = [completeProfile, ...profiles.filter(p => p.id !== completeProfile.id)];
           setProfiles(updated);
@@ -189,15 +206,27 @@ export default function ProfileSwitcherModal({
         const googlePhoto = result.user.photoURL || '';
         const newDraftProfile = {
           id: result.user.uid,
+          uid: result.user.uid,
           firebase_uid: result.user.uid,
           full_name: googleName,
+          displayName: googleName,
           email: result.user.email,
           username: (result.user.email || 'user').split('@')[0] + Math.floor(Math.random() * 1000),
           avatar: googlePhoto,
           avatar_url: googlePhoto,
+          auth_provider: 'google',
+          is_google_user: true,
           role: null,
           is_profile_complete: false
         };
+
+        ensureUserProfile({
+          ...newDraftProfile,
+          uid: result.user.uid,
+          displayName: googleName,
+          email: googleEmail,
+          avatarUrl: googlePhoto
+        }).catch(() => {});
 
         setGoogleLoading(false);
         setOnboardingNewProfile(newDraftProfile);

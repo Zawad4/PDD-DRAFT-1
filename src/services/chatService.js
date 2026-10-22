@@ -22,6 +22,11 @@ import {
   arrayRemove,
   increment
 } from 'firebase/firestore';
+import {
+  encryptMessageText,
+  decryptMessageText,
+  isMessageEncrypted
+} from './cryptoService.js';
 
 /**
  * Default community sports groups to seed
@@ -116,14 +121,27 @@ export async function ensureUserProfile(user) {
     const userRef = doc(db, 'users', uid);
     const snap = await getDoc(userRef);
 
+    const email = (user.email || '').toLowerCase().trim();
+    const isGoogle = !!(
+      user.auth_provider === 'google' ||
+      user.is_google_user ||
+      (email && email.endsWith('@gmail.com')) ||
+      (user.avatar && user.avatar.includes('googleusercontent.com')) ||
+      (user.avatarUrl && user.avatarUrl.includes('googleusercontent.com'))
+    );
+
     const profileData = {
       uid,
-      displayName: user.displayName || user.full_name || user.name || 'Athlete',
-      email: user.email || '',
+      id: uid,
+      displayName: user.displayName || user.full_name || user.name || (email ? email.split('@')[0] : 'Athlete'),
+      name: user.displayName || user.full_name || user.name || (email ? email.split('@')[0] : 'Athlete'),
+      email: email,
       avatarUrl: user.avatarUrl || user.avatar || user.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`,
       role: user.role || 'player',
       sport: user.sport || 'Football',
       location: user.location || 'Chennai, India',
+      auth_provider: isGoogle ? 'google' : (user.auth_provider || 'email'),
+      is_google_user: isGoogle,
       updatedAt: serverTimestamp()
     };
 
@@ -164,6 +182,10 @@ export async function getOrCreateDirectConversation(currentUser, targetUser) {
   
   if (!currentUid || !targetUid) throw new Error('Both users must have valid UIDs');
 
+  // Pre-emptively ensure both users' root profile docs exist in Firestore users collection
+  ensureUserProfile(currentUser).catch(() => {});
+  ensureUserProfile(targetUser).catch(() => {});
+
   const conversationId = getDirectConversationId(currentUid, targetUid);
   const convRef = doc(db, 'conversations', conversationId);
 
@@ -183,9 +205,13 @@ export async function getOrCreateDirectConversation(currentUser, targetUser) {
 
     const convData = {
       id: conversationId,
+      conversationId,
       type: 'direct',
       members: [currentUid, targetUid],
+      participants: [currentUid, targetUid],
       creatorUid: currentUid,
+      isEncrypted: true,
+      encryptionAlgorithm: 'AES-GCM-256',
       lastMessage: null,
       lastMessageTimestamp: null,
       createdAt: serverTimestamp(),
@@ -199,8 +225,11 @@ export async function getOrCreateDirectConversation(currentUser, targetUser) {
       conversationId,
       type: 'direct',
       title: targetName,
+      name: targetName,
       avatarUrl: targetAvatar,
       otherUid: targetUid,
+      isEncrypted: true,
+      is_google_user: !!targetUser.is_google_user,
       lastMessage: null,
       lastMessageTimestamp: serverTimestamp(),
       unreadCount: 0,
@@ -215,8 +244,11 @@ export async function getOrCreateDirectConversation(currentUser, targetUser) {
       conversationId,
       type: 'direct',
       title: currentName,
+      name: currentName,
       avatarUrl: currentAvatar,
       otherUid: currentUid,
+      isEncrypted: true,
+      is_google_user: !!currentUser.is_google_user,
       lastMessage: null,
       lastMessageTimestamp: serverTimestamp(),
       unreadCount: 0,
@@ -226,14 +258,36 @@ export async function getOrCreateDirectConversation(currentUser, targetUser) {
     });
 
     await batch.commit();
+
+    // Cache in local storage for instant offline / fallback access
+    try {
+      const localInboxKey = `turfington_inbox_${currentUid}`;
+      const existing = JSON.parse(localStorage.getItem(localInboxKey) || '[]');
+      const newEntry = {
+        conversationId,
+        id: conversationId,
+        type: 'direct',
+        title: targetName,
+        avatarUrl: targetAvatar,
+        otherUid: targetUid,
+        isEncrypted: true,
+        unreadCount: 0,
+        updatedAt: new Date().toISOString()
+      };
+      localStorage.setItem(localInboxKey, JSON.stringify([newEntry, ...existing.filter(i => (i.conversationId || i.id) !== conversationId)]));
+    } catch {}
+
     return convData;
   } catch (err) {
     console.warn('getOrCreateDirectConversation notice:', err);
     return {
       id: conversationId,
+      conversationId,
       type: 'direct',
       members: [currentUid, targetUid],
-      creatorUid: currentUid
+      participants: [currentUid, targetUid],
+      creatorUid: currentUid,
+      isEncrypted: true
     };
   }
 }
@@ -540,11 +594,15 @@ export async function leaveCommunityGroup(groupId, user) {
  * Send message with batched updates to conversation preview and all members' inboxes
  */
 export async function sendChatMessage(conversationId, senderUser, text, options = {}) {
-  const senderUid = senderUser?.uid || senderUser?.id || senderUser?.firebase_uid;
+  const senderUid = auth.currentUser?.uid || senderUser?.uid || senderUser?.firebase_uid || senderUser?.id;
   if (!senderUid || !text || !text.trim()) throw new Error('Sender UID and text required');
 
+  const cleanText = text.trim();
   const senderName = senderUser.displayName || senderUser.full_name || senderUser.name || 'Athlete';
   const senderAvatar = senderUser.avatarUrl || senderUser.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${senderUid}`;
+
+  // Encrypt the message text with 256-bit AES-GCM
+  const encryptedText = await encryptMessageText(cleanText, conversationId);
 
   const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
@@ -557,11 +615,9 @@ export async function sendChatMessage(conversationId, senderUser, text, options 
     const convSnap = await getDoc(convRef);
     if (convSnap.exists()) {
       convData = convSnap.data();
-      members = convData.members || [senderUid];
+      members = convData.members || convData.participants || [senderUid];
     }
   } catch (e) {}
-
-  const batch = writeBatch(db);
 
   // 2. Message document
   const messageDoc = {
@@ -570,7 +626,10 @@ export async function sendChatMessage(conversationId, senderUser, text, options 
     senderUid,
     senderName,
     senderAvatar,
-    text: text.trim(),
+    text: encryptedText, // Stored encrypted in Firestore
+    content: encryptedText,
+    isEncrypted: true,
+    algorithm: 'AES-GCM-256',
     type: options.type || 'text',
     attachmentUrl: options.attachmentUrl || null,
     attachmentMetadata: options.attachmentMetadata || null,
@@ -582,55 +641,74 @@ export async function sendChatMessage(conversationId, senderUser, text, options 
     editedAt: null,
     createdAt: serverTimestamp()
   };
-  batch.set(messageRef, messageDoc);
 
   // 3. Conversation preview update
   const preview = {
-    text: text.trim(),
+    text: encryptedText,
     senderUid,
     senderName,
+    isEncrypted: true,
+    algorithm: 'AES-GCM-256',
     type: options.type || 'text',
     timestamp: Date.now()
   };
 
-  batch.update(convRef, {
-    lastMessage: preview,
-    lastMessageTimestamp: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  });
-
-  // 4. Fanout to inboxes:
-  // Sender gets unreadCount: 0; other recipients get increment(1)
-  members.forEach(memberUid => {
-    const userInboxRef = doc(db, 'users', memberUid, 'inbox', conversationId);
-    const isSender = memberUid === senderUid;
-
-    batch.set(userInboxRef, {
-      conversationId,
+  try {
+    const batch = writeBatch(db);
+    batch.set(messageRef, messageDoc);
+    batch.set(convRef, {
       lastMessage: preview,
       lastMessageTimestamp: serverTimestamp(),
-      unreadCount: isSender ? 0 : increment(1),
-      ...(isSender ? { lastReadTimestamp: serverTimestamp() } : {}),
-      updatedAt: serverTimestamp()
+      updatedAt: serverTimestamp(),
+      members: members
     }, { merge: true });
-  });
 
-  await batch.commit();
+    // 4. Fanout to inboxes:
+    members.forEach(memberUid => {
+      const userInboxRef = doc(db, 'users', memberUid, 'inbox', conversationId);
+      const isSender = memberUid === senderUid;
 
-  // Express fallback sync
-  fetch('http://localhost:5000/api/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      conversationId,
-      senderId: senderUid,
-      senderName,
-      content: text.trim(),
-      attachments: options.attachmentUrl ? [{ url: options.attachmentUrl }] : []
-    })
-  }).catch(() => {});
+      batch.set(userInboxRef, {
+        conversationId,
+        lastMessage: preview,
+        lastMessageTimestamp: serverTimestamp(),
+        unreadCount: isSender ? 0 : increment(1),
+        ...(isSender ? { lastReadTimestamp: serverTimestamp() } : {}),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    });
 
-  return { ...messageDoc, createdAt: new Date().toISOString() };
+    await batch.commit();
+  } catch (firestoreErr) {
+    console.warn('sendChatMessage Firestore notice (falling back):', firestoreErr);
+  }
+
+  // 5. Express backend fallback persistence
+  try {
+    fetch('http://localhost:5000/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId,
+        senderId: senderUid,
+        senderName,
+        content: encryptedText,
+        text: encryptedText,
+        isEncrypted: true,
+        algorithm: 'AES-GCM-256',
+        attachments: options.attachmentUrl ? [{ url: options.attachmentUrl }] : []
+      })
+    }).catch(() => {});
+  } catch {}
+
+  // 6. Return decrypted plainText so optimistic UI immediately displays plain text!
+  return { 
+    ...messageDoc, 
+    text: cleanText, 
+    content: cleanText, 
+    isEncrypted: true, 
+    createdAt: new Date().toISOString() 
+  };
 }
 
 /**
@@ -710,7 +788,7 @@ export async function toggleMuteConversation(uid, conversationId, isMuted) {
 }
 
 /**
- * Real-time listener for user's inbox
+ * Real-time listener for user's inbox with automated preview decryption
  */
 export function subscribeToUserInbox(uid, callback) {
   if (!uid) return () => {};
@@ -722,11 +800,28 @@ export function subscribeToUserInbox(uid, callback) {
       limit(50)
     );
 
-    return onSnapshot(inboxQuery, (snapshot) => {
-      const items = snapshot.docs.map(d => ({
+    return onSnapshot(inboxQuery, async (snapshot) => {
+      const rawItems = snapshot.docs.map(d => ({
         id: d.id,
         conversationId: d.id,
         ...d.data()
+      }));
+
+      // Decrypt inbox preview text if encrypted
+      const items = await Promise.all(rawItems.map(async (item) => {
+        if (item.lastMessage && item.lastMessage.text) {
+          const rawText = item.lastMessage.text;
+          const decrypted = await decryptMessageText(rawText, item.conversationId);
+          return {
+            ...item,
+            lastMessage: {
+              ...item.lastMessage,
+              text: decrypted,
+              isEncrypted: isMessageEncrypted(rawText) || !!item.lastMessage.isEncrypted
+            }
+          };
+        }
+        return item;
       }));
 
       // Sort pinned to the top
@@ -740,8 +835,14 @@ export function subscribeToUserInbox(uid, callback) {
 
       callback(items);
     }, (err) => {
-      console.warn('subscribeToUserInbox notice:', err);
-      callback([]);
+      console.warn('subscribeToUserInbox notice (using local cache):', err);
+      try {
+        const localKey = `turfington_inbox_${uid}`;
+        const cached = JSON.parse(localStorage.getItem(localKey) || '[]');
+        callback(cached);
+      } catch {
+        callback([]);
+      }
     });
   } catch (e) {
     return () => {};
@@ -749,11 +850,12 @@ export function subscribeToUserInbox(uid, callback) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 6. Paginated Message History Listener
+// 6. Paginated Message History Listener with Automated Decryption
 // ─────────────────────────────────────────────────────────────
 
 /**
  * Subscribe to recent messages in a conversation (paginated initial window)
+ * Automatically decrypts all E2EE messages via Web Crypto AES-GCM
  */
 export function subscribeToMessages(conversationId, callback, pageSize = 35) {
   if (!conversationId) return () => {};
@@ -765,19 +867,53 @@ export function subscribeToMessages(conversationId, callback, pageSize = 35) {
       limit(pageSize)
     );
 
-    return onSnapshot(msgQuery, (snapshot) => {
+    return onSnapshot(msgQuery, async (snapshot) => {
       const docs = snapshot.docs;
       const oldestDoc = docs.length > 0 ? docs[docs.length - 1] : null;
 
       // Reverse so messages appear in ascending chronological order in the chat window
-      const messages = docs.map(d => ({
+      const rawMessages = docs.map(d => ({
         id: d.id,
         ...d.data()
       })).reverse();
 
-      callback({ messages, oldestDoc, hasMore: docs.length === pageSize });
-    }, (err) => {
+      // Decrypt any encrypted messages in parallel
+      const decryptedMessages = await Promise.all(rawMessages.map(async (m) => {
+        const rawContent = m.text || m.content || '';
+        const isEnc = isMessageEncrypted(rawContent) || !!m.isEncrypted;
+        const decrypted = isEnc ? await decryptMessageText(rawContent, conversationId) : rawContent;
+        return {
+          ...m,
+          text: decrypted,
+          content: decrypted,
+          isEncrypted: isEnc
+        };
+      }));
+
+      callback({ messages: decryptedMessages, oldestDoc, hasMore: docs.length === pageSize });
+    }, async (err) => {
       console.warn('subscribeToMessages notice:', err);
+      // Fallback to Express backend
+      try {
+        const res = await fetch(`http://localhost:5000/api/messages?chatId=${encodeURIComponent(conversationId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data.messages || []);
+          const decryptedList = await Promise.all(list.map(async m => {
+            const rawContent = m.text || m.content || '';
+            const isEnc = isMessageEncrypted(rawContent) || !!m.isEncrypted;
+            const decrypted = isEnc ? await decryptMessageText(rawContent, conversationId) : rawContent;
+            return {
+              ...m,
+              text: decrypted,
+              content: decrypted,
+              isEncrypted: isEnc
+            };
+          }));
+          callback({ messages: decryptedList, oldestDoc: null, hasMore: false });
+          return;
+        }
+      } catch {}
       callback({ messages: [], oldestDoc: null, hasMore: false });
     });
   } catch (e) {
@@ -803,13 +939,25 @@ export async function loadMoreMessages(conversationId, oldestDoc, pageSize = 30)
     const docs = snapshot.docs;
     const newOldest = docs.length > 0 ? docs[docs.length - 1] : null;
 
-    const messages = docs.map(d => ({
+    const rawMessages = docs.map(d => ({
       id: d.id,
       ...d.data()
     })).reverse();
 
+    const decryptedMessages = await Promise.all(rawMessages.map(async (m) => {
+      const rawContent = m.text || m.content || '';
+      const isEnc = isMessageEncrypted(rawContent) || !!m.isEncrypted;
+      const decrypted = isEnc ? await decryptMessageText(rawContent, conversationId) : rawContent;
+      return {
+        ...m,
+        text: decrypted,
+        content: decrypted,
+        isEncrypted: isEnc
+      };
+    }));
+
     return {
-      messages,
+      messages: decryptedMessages,
       oldestDoc: newOldest,
       hasMore: docs.length === pageSize
     };

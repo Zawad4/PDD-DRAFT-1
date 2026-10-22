@@ -4,6 +4,7 @@ import { Mail, User, AlertCircle, Loader2, ArrowRight, Building2, Sparkles, Chec
 import { GoogleAuthProvider, signInWithPopup, signInWithCredential, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../services/firebase';
 import { apiFetchProfile, apiFetchProfileByEmail, apiCreateProfile, apiCheckUsernameUnique, apiGetEmailByUsername, apiUpdateProfile } from '../services/db';
+import { ensureUserProfile } from '../services/chatService';
 import { Capacitor } from '@capacitor/core';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 
@@ -150,6 +151,8 @@ export default function Auth({ onLogin }) {
         const completeExisting = {
           ...profile,
           role: profile.role || 'player',
+          auth_provider: 'google',
+          is_google_user: true,
           is_profile_complete: true,
           sports_interests: profile.sports_interests || ['Football', 'Cricket'],
           interests: profile.interests || [
@@ -158,7 +161,20 @@ export default function Auth({ onLogin }) {
           ]
         };
 
-        apiUpdateProfile(completeExisting.id, { role: completeExisting.role, is_profile_complete: true }).catch(() => {});
+        apiUpdateProfile(completeExisting.id, { 
+          role: completeExisting.role, 
+          auth_provider: 'google',
+          is_google_user: true,
+          is_profile_complete: true 
+        }).catch(() => {});
+
+        ensureUserProfile({
+          ...completeExisting,
+          uid: result.user.uid,
+          displayName: completeExisting.full_name || completeExisting.name,
+          email: googleEmail,
+          avatarUrl: completeExisting.avatar || completeExisting.avatar_url
+        }).catch(() => {});
 
         try {
           localStorage.setItem('turfington_current_profile', JSON.stringify(completeExisting));
@@ -176,12 +192,16 @@ export default function Auth({ onLogin }) {
 
         const googleProfile = {
           id: result.user.uid,
+          uid: result.user.uid,
           firebase_uid: result.user.uid,
           full_name: googleName,
+          displayName: googleName,
           email: googleEmail || 'googleuser@turfington.com',
           username: (googleEmail || 'user').split('@')[0] + Math.floor(Math.random() * 1000),
           avatar: googlePhoto,
           avatar_url: googlePhoto,
+          auth_provider: 'google',
+          is_google_user: true,
           role: null,
           is_profile_complete: false,
           stats: [
@@ -202,6 +222,14 @@ export default function Auth({ onLogin }) {
           return;
         }
         profile = created.profile || googleProfile;
+
+        ensureUserProfile({
+          ...profile,
+          uid: result.user.uid,
+          displayName: googleName,
+          email: googleEmail,
+          avatarUrl: googlePhoto
+        }).catch(() => {});
 
         // Brand new account onboarding
         setLoading(false);

@@ -26,6 +26,7 @@ const Community = lazy(() => import('./pages/Community'));
 import { auth } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { apiFetchProfile, apiFetchProfileByEmail, apiSaveSavedProfile } from './services/db';
+import { ensureUserProfile } from './services/chatService';
 import ProfileSwitcherModal from './components/ProfileSwitcherModal';
 import UserAvatar from './components/UserAvatar';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -87,6 +88,16 @@ export default function App() {
           }
           if (existingProfile) {
             setUser(existingProfile);
+            ensureUserProfile(existingProfile).catch(() => {});
+          } else {
+            ensureUserProfile({
+              uid: fbUser.uid,
+              displayName: fbUser.displayName || 'Athlete',
+              email: fbUser.email || '',
+              avatarUrl: fbUser.photoURL || '',
+              auth_provider: fbUser.providerData?.some(p => p.providerId === 'google.com') ? 'google' : 'email',
+              is_google_user: fbUser.providerData?.some(p => p.providerId === 'google.com') || fbUser.email?.endsWith('@gmail.com')
+            }).catch(() => {});
           }
         }
       } else {
