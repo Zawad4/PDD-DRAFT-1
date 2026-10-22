@@ -2587,3 +2587,117 @@ export async function apiGetEmailByUsername(username) {
   } catch (err) {}
   return null;
 }
+
+// ── 15. PEER REVIEWS & PERFORMANCE / BEHAVIOUR RATINGS ──────────
+export async function apiFetchPlayerReviews(playerId) {
+  const cacheKey = 'turfington_player_reviews_' + playerId;
+  try {
+    const res = await fetch(`http://localhost:5000/api/players/${encodeURIComponent(playerId)}/reviews`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success) {
+        try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn('Backend player reviews fetch error, falling back to cache:', err.message);
+  }
+
+  // Local storage fallback
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch {}
+
+  // Default empty structure
+  return {
+    success: true,
+    playerId,
+    totalReviews: 0,
+    avgPerformance: 5.0,
+    avgBehaviour: 5.0,
+    overallScore: 5.0,
+    distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
+    badgeCounts: {},
+    reviews: []
+  };
+}
+
+export async function apiSubmitPlayerReview(playerId, reviewData) {
+  const cacheKey = 'turfington_player_reviews_' + playerId;
+  let serverReview = null;
+
+  try {
+    const res = await fetch(`http://localhost:5000/api/players/${encodeURIComponent(playerId)}/reviews`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reviewData)
+    });
+    if (res.ok) {
+      const json = await res.json();
+      serverReview = json.review;
+    }
+  } catch (err) {
+    console.warn('Backend player review submit notice:', err.message);
+  }
+
+  const reviewToSave = serverReview || {
+    id: 'rev_' + Date.now(),
+    player_id: playerId,
+    reviewer_id: reviewData.reviewer_id || 'usr_anonymous',
+    reviewer_name: reviewData.reviewer_name || 'Anonymous Athlete',
+    reviewer_avatar: reviewData.reviewer_avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Athlete',
+    reviewer_sport: reviewData.reviewer_sport || 'Football',
+    performance_rating: Number(reviewData.performance_rating) || 5,
+    behaviour_rating: Number(reviewData.behaviour_rating) || 5,
+    badges: Array.isArray(reviewData.badges) ? reviewData.badges : [],
+    comment: reviewData.comment || '',
+    match_context: reviewData.match_context || 'Verified Match',
+    helpful_count: 0,
+    helpful_users: [],
+    created_at: new Date().toISOString()
+  };
+
+  // Update local storage cache
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    const data = cached ? JSON.parse(cached) : { reviews: [] };
+    data.reviews = [reviewToSave, ...(data.reviews || [])];
+    data.totalReviews = data.reviews.length;
+    
+    let pSum = 0;
+    let bSum = 0;
+    const dist = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    const bCounts = {};
+    data.reviews.forEach(r => {
+      pSum += Number(r.performance_rating) || 5;
+      bSum += Number(r.behaviour_rating) || 5;
+      const p = Math.min(5, Math.max(1, Math.round(Number(r.performance_rating) || 5)));
+      dist[p] = (dist[p] || 0) + 1;
+      (r.badges || []).forEach(b => { bCounts[b] = (bCounts[b] || 0) + 1; });
+    });
+    data.avgPerformance = parseFloat((pSum / data.totalReviews).toFixed(1));
+    data.avgBehaviour = parseFloat((bSum / data.totalReviews).toFixed(1));
+    data.overallScore = parseFloat(((data.avgPerformance + data.avgBehaviour) / 2).toFixed(1));
+    data.distribution = dist;
+    data.badgeCounts = bCounts;
+    localStorage.setItem(cacheKey, JSON.stringify(data));
+  } catch {}
+
+  return { success: true, review: reviewToSave };
+}
+
+export async function apiToggleReviewHelpful(reviewId, userId) {
+  try {
+    const res = await fetch(`http://localhost:5000/api/reviews/${encodeURIComponent(reviewId)}/helpful`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch {}
+  return { success: true };
+}

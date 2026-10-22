@@ -511,7 +511,89 @@ const INITIAL_DATA = {
     }
   ],
   posts: [],
-  marketplace: []
+  marketplace: [],
+  player_reviews: [
+    {
+      id: 'rev_101',
+      player_id: 'usr_rahul',
+      reviewer_id: 'usr_vikram',
+      reviewer_name: 'Vikram Rao',
+      reviewer_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Vikram',
+      reviewer_sport: 'Football',
+      performance_rating: 5,
+      behaviour_rating: 5,
+      badges: ['Clutch Player', 'Fair Play Champion', 'Team Motivator'],
+      comment: 'Unreal stamina and midfield distribution! Scored the winning penalty in our Indiranagar 7v7 shootout. Always stays calm even when tackles fly in. Never argues with the referee.',
+      match_context: 'Weekend Night Champions League (Indiranagar Turf)',
+      helpful_count: 8,
+      helpful_users: [],
+      created_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString()
+    },
+    {
+      id: 'rev_102',
+      player_id: 'usr_rahul',
+      reviewer_id: 'usr_karthik',
+      reviewer_name: 'Karthik Subramanian',
+      reviewer_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Karthik',
+      reviewer_sport: 'Cricket',
+      performance_rating: 5,
+      behaviour_rating: 4,
+      badges: ['Deadly Precision', 'Always On Time'],
+      comment: 'Solid opening batsman. Arrived 15 minutes before slot time for warmups. Tremendous work rate and team ethic.',
+      match_context: 'Box Cricket Derby @ Turf Together',
+      helpful_count: 5,
+      helpful_users: [],
+      created_at: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString()
+    },
+    {
+      id: 'rev_103',
+      player_id: 'usr_rahul',
+      reviewer_id: 'usr_sneha',
+      reviewer_name: 'Sneha Reddy',
+      reviewer_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sneha',
+      reviewer_sport: 'Badminton',
+      performance_rating: 4,
+      behaviour_rating: 5,
+      badges: ['Fair Play Champion', 'Respectful Athlete'],
+      comment: 'Great mixed doubles partner! Respects calls, cheers up teammates during tough points, and shows top-tier sportsmanship.',
+      match_context: 'Smash Masters Badminton Cup',
+      helpful_count: 3,
+      helpful_users: [],
+      created_at: new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString()
+    },
+    {
+      id: 'rev_104',
+      player_id: 'usr_vikram',
+      reviewer_id: 'usr_rahul',
+      reviewer_name: 'Rahul Sharma',
+      reviewer_avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Rahul',
+      reviewer_sport: 'Football',
+      performance_rating: 5,
+      behaviour_rating: 5,
+      badges: ['Rock-Solid Defense', 'Natural Leader'],
+      comment: 'Captain material. Reads the game two steps ahead. Completely organized our defense and was gracious to the opposing team after the match.',
+      match_context: 'Chennai Football Arena Clash',
+      helpful_count: 6,
+      helpful_users: [],
+      created_at: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString()
+    },
+    {
+      id: 'rev_105',
+      player_id: 'usr_sneha',
+      reviewer_id: 'usr_priya',
+      reviewer_name: 'Priya Sharma',
+      reviewer_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Priya',
+      reviewer_sport: 'Pickleball',
+      performance_rating: 5,
+      behaviour_rating: 5,
+      badges: ['Clutch Player', 'Fair Play Champion'],
+      comment: 'Lethal kitchen drops and incredible hand speed in Pickleball doubles! Always positive vibes on the court.',
+      match_context: 'Pickleball Summer Open',
+      helpful_count: 4,
+      helpful_users: [],
+      created_at: new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString()
+    }
+  ]
 };
 
 let dbCache = null;
@@ -536,6 +618,7 @@ function readDB() {
     if (!parsed.friends) parsed.friends = [];
     if (!parsed.friend_requests) parsed.friend_requests = [];
     if (!parsed.chats) parsed.chats = [];
+    if (!parsed.player_reviews || !parsed.player_reviews.length) parsed.player_reviews = INITIAL_DATA.player_reviews;
     dbCache = parsed;
     lastReadTime = now;
     return parsed;
@@ -2155,6 +2238,137 @@ app.post('/api/chats', (req, res) => {
     }
     writeDB(db);
     res.json({ success: true, chat: chatData });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PEER REVIEWS & ATHLETE PERFORMANCE / BEHAVIOUR API ──
+app.get('/api/players/:playerId/reviews', (req, res) => {
+  try {
+    const db = readDB();
+    const { playerId } = req.params;
+    const allReviews = db.player_reviews || [];
+    
+    // Normalize target matching (by id, email, username or handle)
+    const target = String(playerId).toLowerCase();
+    const reviews = allReviews.filter(r => {
+      return String(r.player_id).toLowerCase() === target ||
+             (r.player_handle && String(r.player_handle).toLowerCase() === target) ||
+             (r.player_email && String(r.player_email).toLowerCase() === target);
+    });
+
+    const total = reviews.length;
+    let avgPerformance = 0;
+    let avgBehaviour = 0;
+    const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    const badgeCounts = {};
+
+    if (total > 0) {
+      let perfSum = 0;
+      let behSum = 0;
+      reviews.forEach(r => {
+        const p = Math.min(5, Math.max(1, Math.round(Number(r.performance_rating) || 5)));
+        perfSum += Number(r.performance_rating) || 5;
+        behSum += Number(r.behaviour_rating) || 5;
+        distribution[p] = (distribution[p] || 0) + 1;
+        if (Array.isArray(r.badges)) {
+          r.badges.forEach(badge => {
+            badgeCounts[badge] = (badgeCounts[badge] || 0) + 1;
+          });
+        }
+      });
+      avgPerformance = parseFloat((perfSum / total).toFixed(1));
+      avgBehaviour = parseFloat((behSum / total).toFixed(1));
+    }
+
+    res.json({
+      success: true,
+      playerId,
+      totalReviews: total,
+      avgPerformance,
+      avgBehaviour,
+      overallScore: total > 0 ? parseFloat(((avgPerformance + avgBehaviour) / 2).toFixed(1)) : 5.0,
+      distribution,
+      badgeCounts,
+      reviews
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/players/:playerId/reviews', (req, res) => {
+  try {
+    const db = readDB();
+    if (!db.player_reviews) db.player_reviews = [];
+    const { playerId } = req.params;
+    const {
+      reviewer_id,
+      reviewer_name,
+      reviewer_avatar,
+      reviewer_sport,
+      performance_rating,
+      behaviour_rating,
+      badges,
+      comment,
+      match_context
+    } = req.body;
+
+    if (!comment || !comment.trim()) {
+      return res.status(400).json({ success: false, error: 'Review comment cannot be empty' });
+    }
+
+    const newReview = {
+      id: 'rev_' + Date.now(),
+      player_id: playerId,
+      reviewer_id: reviewer_id || 'usr_anonymous',
+      reviewer_name: reviewer_name || 'Anonymous Athlete',
+      reviewer_avatar: reviewer_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${reviewer_name || 'Athlete'}`,
+      reviewer_sport: reviewer_sport || 'Football',
+      performance_rating: Math.min(5, Math.max(1, Number(performance_rating) || 5)),
+      behaviour_rating: Math.min(5, Math.max(1, Number(behaviour_rating) || 5)),
+      badges: Array.isArray(badges) ? badges : [],
+      comment: comment.trim(),
+      match_context: match_context || 'Verified Turf Match',
+      helpful_count: 0,
+      helpful_users: [],
+      created_at: new Date().toISOString()
+    };
+
+    db.player_reviews.unshift(newReview);
+    writeDB(db);
+
+    res.json({ success: true, review: newReview });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/reviews/:reviewId/helpful', (req, res) => {
+  try {
+    const db = readDB();
+    if (!db.player_reviews) db.player_reviews = [];
+    const { reviewId } = req.params;
+    const { userId } = req.body;
+
+    const rev = db.player_reviews.find(r => r.id === reviewId);
+    if (!rev) {
+      return res.status(404).json({ success: false, error: 'Review not found' });
+    }
+
+    if (!rev.helpful_users) rev.helpful_users = [];
+    const uIdx = rev.helpful_users.indexOf(userId);
+    if (uIdx >= 0) {
+      rev.helpful_users.splice(uIdx, 1);
+      rev.helpful_count = Math.max(0, (rev.helpful_count || 1) - 1);
+    } else {
+      if (userId) rev.helpful_users.push(userId);
+      rev.helpful_count = (rev.helpful_count || 0) + 1;
+    }
+
+    writeDB(db);
+    res.json({ success: true, helpful_count: rev.helpful_count, user_reacted: uIdx < 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

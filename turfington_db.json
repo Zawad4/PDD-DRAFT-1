@@ -1299,5 +1299,122 @@
       "created_at": "2026-10-14T11:11:58.250Z",
       "updated_at": "2026-10-14T11:11:58.250Z"
     }
+  ],
+  "player_reviews": [
+    {
+      "id": "rev_1792572938293",
+      "player_id": "usr_rahul",
+      "reviewer_id": "usr_priya",
+      "reviewer_name": "Priya Sharma",
+      "reviewer_avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Priya Sharma",
+      "reviewer_sport": "Pickleball",
+      "performance_rating": 5,
+      "behaviour_rating": 5,
+      "badges": [
+        "Clutch Player",
+        "Fair Play Champion"
+      ],
+      "comment": "Played an intense pickleball tournament with Rahul today. Outstanding sportsmanship and very punctual!",
+      "match_context": "Verified Turf Match",
+      "helpful_count": 0,
+      "helpful_users": [],
+      "created_at": "2026-10-21T08:55:38.293Z"
+    },
+    {
+      "id": "rev_101",
+      "player_id": "usr_rahul",
+      "reviewer_id": "usr_vikram",
+      "reviewer_name": "Vikram Rao",
+      "reviewer_avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Vikram",
+      "reviewer_sport": "Football",
+      "performance_rating": 5,
+      "behaviour_rating": 5,
+      "badges": [
+        "Clutch Player",
+        "Fair Play Champion",
+        "Team Motivator"
+      ],
+      "comment": "Unreal stamina and midfield distribution! Scored the winning penalty in our Indiranagar 7v7 shootout. Always stays calm even when tackles fly in. Never argues with the referee.",
+      "match_context": "Weekend Night Champions League (Indiranagar Turf)",
+      "helpful_count": 8,
+      "helpful_users": [],
+      "created_at": "2026-10-19T08:54:51.729Z"
+    },
+    {
+      "id": "rev_102",
+      "player_id": "usr_rahul",
+      "reviewer_id": "usr_karthik",
+      "reviewer_name": "Karthik Subramanian",
+      "reviewer_avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Karthik",
+      "reviewer_sport": "Cricket",
+      "performance_rating": 5,
+      "behaviour_rating": 4,
+      "badges": [
+        "Deadly Precision",
+        "Always On Time"
+      ],
+      "comment": "Solid opening batsman. Arrived 15 minutes before slot time for warmups. Tremendous work rate and team ethic.",
+      "match_context": "Box Cricket Derby @ Turf Together",
+      "helpful_count": 5,
+      "helpful_users": [],
+      "created_at": "2026-10-16T08:54:51.729Z"
+    },
+    {
+      "id": "rev_103",
+      "player_id": "usr_rahul",
+      "reviewer_id": "usr_sneha",
+      "reviewer_name": "Sneha Reddy",
+      "reviewer_avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Sneha",
+      "reviewer_sport": "Badminton",
+      "performance_rating": 4,
+      "behaviour_rating": 5,
+      "badges": [
+        "Fair Play Champion",
+        "Respectful Athlete"
+      ],
+      "comment": "Great mixed doubles partner! Respects calls, cheers up teammates during tough points, and shows top-tier sportsmanship.",
+      "match_context": "Smash Masters Badminton Cup",
+      "helpful_count": 3,
+      "helpful_users": [],
+      "created_at": "2026-10-13T08:54:51.729Z"
+    },
+    {
+      "id": "rev_104",
+      "player_id": "usr_vikram",
+      "reviewer_id": "usr_rahul",
+      "reviewer_name": "Rahul Sharma",
+      "reviewer_avatar": "https://api.dicebear.com/7.x/bottts/svg?seed=Rahul",
+      "reviewer_sport": "Football",
+      "performance_rating": 5,
+      "behaviour_rating": 5,
+      "badges": [
+        "Rock-Solid Defense",
+        "Natural Leader"
+      ],
+      "comment": "Captain material. Reads the game two steps ahead. Completely organized our defense and was gracious to the opposing team after the match.",
+      "match_context": "Chennai Football Arena Clash",
+      "helpful_count": 6,
+      "helpful_users": [],
+      "created_at": "2026-10-18T08:54:51.729Z"
+    },
+    {
+      "id": "rev_105",
+      "player_id": "usr_sneha",
+      "reviewer_id": "usr_priya",
+      "reviewer_name": "Priya Sharma",
+      "reviewer_avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=Priya",
+      "reviewer_sport": "Pickleball",
+      "performance_rating": 5,
+      "behaviour_rating": 5,
+      "badges": [
+        "Clutch Player",
+        "Fair Play Champion"
+      ],
+      "comment": "Lethal kitchen drops and incredible hand speed in Pickleball doubles! Always positive vibes on the court.",
+      "match_context": "Pickleball Summer Open",
+      "helpful_count": 4,
+      "helpful_users": [],
+      "created_at": "2026-10-17T08:54:51.729Z"
+    }
   ]
 }

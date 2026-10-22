@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { apiUpdateProfile, apiDeleteAccount } from '../services/db';
 import UserAvatar from '../components/UserAvatar';
+import PlayerReviewSection from '../components/PlayerReviewSection';
 
 const ALL_AVAILABLE_SPORTS = ['Football', 'Cricket', 'Badminton', 'Basketball', 'Tennis', 'Table Tennis', 'Volleyball', 'Pickleball', 'Bowling', 'Swimming', 'Squash'];
 
@@ -535,7 +536,7 @@ export default function Profile({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {/* 1. Show-Up Score (Attended or No-Show) */}
           <div className="bg-neutral-900/90 border border-indigo-500/20 rounded-2xl p-5 text-left space-y-2.5">
             <div className="flex items-center justify-between">
@@ -547,14 +548,14 @@ export default function Profile({
             <div className="flex items-baseline space-x-2">
               <span className="font-display font-black text-3xl text-white">96%</span>
               <span className="text-[10px] font-extrabold text-indigo-400 bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
-                Showed Up 24/25 Matches
+                Showed Up 24/25
               </span>
             </div>
             <div className="w-full bg-neutral-800 h-2 rounded-full overflow-hidden">
               <div className="bg-gradient-to-r from-indigo-500 to-cyan-400 h-full rounded-full" style={{ width: '96%' }} />
             </div>
             <p className="text-[11px] text-neutral-400 font-light leading-snug">
-              Tracks whether the player actually shows up after committing to a match. 0 unexcused no-shows recorded.
+              Tracks whether the player shows up after committing to a match. 0 unexcused no-shows.
             </p>
           </div>
 
@@ -562,128 +563,219 @@ export default function Profile({
           <div className="bg-neutral-900/90 border border-emerald-500/20 rounded-2xl p-5 text-left space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-emerald-400" /> On-Time Punctuality Score
+                <Clock className="w-4 h-4 text-emerald-400" /> On-Time Punctuality
               </span>
               <span className="text-xs font-bold text-neutral-400">4.9★</span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="font-display font-black text-3xl text-white">98%</span>
+              <span className="text-[10px] font-extrabold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                Punctual 25/25
+              </span>
             </div>
             <div className="w-full bg-neutral-800 h-2 rounded-full overflow-hidden">
               <div className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full" style={{ width: '98%' }} />
             </div>
             <p className="text-[11px] text-neutral-400 font-light leading-snug">
-              Tracks whether the player arrives on time for match kickoff. 0 late arrivals recorded.
+              Tracks whether the player arrives on time for kickoff. 0 late arrivals recorded.
             </p>
           </div>
+
+          {/* 3. Peer Performance & Behaviour Score (Peer Reviews) */}
+          <div 
+            onClick={() => setActiveTab('Reviews')}
+            className="bg-neutral-900/90 border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-5 text-left space-y-2.5 transition-all cursor-pointer group hover:bg-amber-500/[0.04]"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                <Star className="w-4 h-4 fill-amber-400 text-amber-400" /> Peer Performance & Behaviour
+              </span>
+              <span className="text-[10px] font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30">
+                100% Endorsed
+              </span>
+            </div>
+            <div className="flex items-baseline space-x-2">
+              <span className="font-display font-black text-3xl text-amber-400 group-hover:scale-105 transition-transform inline-block">4.9★</span>
+              <span className="text-xs font-bold text-neutral-400">/ 5.0 Peer Rating</span>
+            </div>
+            <div className="w-full bg-neutral-800 h-2 rounded-full overflow-hidden">
+              <div className="bg-gradient-to-r from-amber-500 to-yellow-400 h-full rounded-full" style={{ width: '98%' }} />
+            </div>
+            <div className="flex items-center justify-between pt-0.5">
+              <p className="text-[11px] text-neutral-400 font-light">
+                Skill, stamina, composure & fair play.
+              </p>
+              <span className="text-[10px] font-extrabold text-amber-400 group-hover:underline">
+                View Reviews →
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* 3. MAIN CONTENT LAYOUT */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* LEFT COLUMN: Overview & Activity Calendar */}
-        <div className="lg:col-span-2 space-y-8">
+      {/* 2.8 PROFILE TAB NAVIGATION (Overview vs Peer Reviews) */}
+      <div className="flex items-center space-x-3 border-b border-white/10 pb-4 mb-8">
+        <button
+          onClick={() => setActiveTab('Overview')}
+          className={`px-5 py-2.5 rounded-full text-xs font-extrabold uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer ${
+            activeTab === 'Overview'
+              ? 'bg-white text-black shadow-lg shadow-white/10'
+              : 'bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          <span>Activity & Overview</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('Reviews')}
+          className={`px-5 py-2.5 rounded-full text-xs font-extrabold uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer ${
+            activeTab === 'Reviews'
+              ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-600/30'
+              : 'bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white'
+          }`}
+        >
+          <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+          <span>Peer Reviews & Behaviour Feedback</span>
+          <span className="px-2 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-black">
+            Verified
+          </span>
+        </button>
+      </div>
+
+      {/* 3. TAB CONTENT */}
+      {activeTab === 'Reviews' ? (
+        <PlayerReviewSection targetPlayer={user} currentUser={user} />
+      ) : (
+        /* OVERVIEW TAB CONTENT LAYOUT */
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
-          {/* Sports Interests */}
-          <div className="glass-card p-6 border border-white/5 space-y-4">
-            <h3 className="font-display font-extrabold text-sm uppercase tracking-wider pb-3 border-b border-white/5">
-              Sports Interests
-            </h3>
-            <div className="flex flex-wrap gap-2.5">
-              {profile.interests.map((item, i) => (
-                <div 
-                  key={i} 
-                  className="flex items-center space-x-2 px-3.5 py-2 bg-white/[0.03] border border-white/10 rounded-xl text-xs font-bold text-white"
-                >
-                  <span className="text-base">{item.icon}</span>
-                  <span>{item.sport}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Monthly Activity Calendar */}
-          <div className="glass-card p-6 border border-white/5 space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-white/5">
-              <div>
-                <h3 className="font-display font-extrabold text-sm uppercase tracking-wider">
-                  Activity Calendar
-                </h3>
-                <p className="text-[11px] text-neutral-400 font-light mt-0.5">{currentMonthName}</p>
-              </div>
-
-              <div className="flex items-center space-x-3 text-xs font-bold text-neutral-400">
-                <span className="flex items-center space-x-1">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-                  <span>{activeDaysCount} Active Days</span>
-                </span>
-                <span>•</span>
-                <span>{totalMatches} Matches</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-7 gap-2">
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-                <div key={d} className="text-center text-[10px] font-extrabold uppercase text-neutral-500 py-1">
-                  {d}
-                </div>
-              ))}
-              {juneActivity.map((act) => {
-                const isToday = act.day === todayDayNum;
-                const isSelected = act.day === selectedDay;
-                const isActive = act.weight > 0;
-
-                return (
-                  <button
-                    key={act.day}
-                    onClick={() => setSelectedDay(act.day)}
-                    className={`h-11 rounded-xl flex flex-col items-center justify-center relative transition-all cursor-pointer border ${
-                      isSelected
-                        ? 'border-indigo-500 bg-indigo-500/20 text-white shadow-lg'
-                        : isToday
-                          ? 'border-white/30 bg-white/10 text-white'
-                          : isActive
-                            ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
-                            : 'border-white/5 bg-white/[0.01] text-neutral-500 hover:bg-white/[0.04]'
-                    }`}
+          {/* LEFT COLUMN: Overview & Activity Calendar */}
+          <div className="lg:col-span-2 space-y-8">
+            
+            {/* Sports Interests */}
+            <div className="glass-card p-6 border border-white/5 space-y-4">
+              <h3 className="font-display font-extrabold text-sm uppercase tracking-wider pb-3 border-b border-white/5">
+                Sports Interests
+              </h3>
+              <div className="flex flex-wrap gap-2.5">
+                {profile.interests.map((item, i) => (
+                  <div 
+                    key={i} 
+                    className="flex items-center space-x-2 px-3.5 py-2 bg-white/[0.03] border border-white/10 rounded-xl text-xs font-bold text-white"
                   >
-                    <span className="text-xs font-bold">{act.day}</span>
-                    {isActive && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-0.5" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: Account Summary */}
-        <div className="space-y-8">
-          <div className="glass-card p-6 border border-white/5 space-y-4">
-            <h3 className="font-display font-extrabold text-sm uppercase tracking-wider pb-3 border-b border-white/5">
-              Account Summary
-            </h3>
-
-            <div className="space-y-3 text-xs">
-              <div className="flex justify-between items-center py-2 border-b border-white/5">
-                <span className="text-neutral-400 font-light">Account Type:</span>
-                <span className="font-bold text-white uppercase tracking-wider">{role === 'owner' ? 'Venue Owner' : 'Player'}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-white/5">
-                <span className="text-neutral-400 font-light">Email Address:</span>
-                <span className="font-bold text-neutral-300 truncate max-w-[160px]">{user?.email || 'N/A'}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-white/5">
-                <span className="text-neutral-400 font-light">Player ID:</span>
-                <span className="font-bold text-indigo-400 font-mono text-xs">{editPlayerId || initialPlayerId}</span>
+                    <span className="text-base">{item.icon}</span>
+                    <span>{item.sport}</span>
+                  </div>
+                ))}
               </div>
             </div>
+
+            {/* Monthly Activity Calendar */}
+            <div className="glass-card p-6 border border-white/5 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-white/5">
+                <div>
+                  <h3 className="font-display font-extrabold text-sm uppercase tracking-wider">
+                    Activity Calendar
+                  </h3>
+                  <p className="text-[11px] text-neutral-400 font-light mt-0.5">{currentMonthName}</p>
+                </div>
+
+                <div className="flex items-center space-x-3 text-xs font-bold text-neutral-400">
+                  <span className="flex items-center space-x-1">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                    <span>{activeDaysCount} Active Days</span>
+                  </span>
+                  <span>•</span>
+                  <span>{totalMatches} Matches</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-7 gap-2">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                  <div key={d} className="text-center text-[10px] font-extrabold uppercase text-neutral-500 py-1">
+                    {d}
+                  </div>
+                ))}
+                {juneActivity.map((act) => {
+                  const isToday = act.day === todayDayNum;
+                  const isSelected = act.day === selectedDay;
+                  const isActive = act.weight > 0;
+
+                  return (
+                    <button
+                      key={act.day}
+                      onClick={() => setSelectedDay(act.day)}
+                      className={`h-11 rounded-xl flex flex-col items-center justify-center relative transition-all cursor-pointer border ${
+                        isSelected
+                          ? 'border-indigo-500 bg-indigo-500/20 text-white shadow-lg'
+                          : isToday
+                            ? 'border-white/30 bg-white/10 text-white'
+                            : isActive
+                              ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
+                              : 'border-white/5 bg-white/[0.01] text-neutral-500 hover:bg-white/[0.04]'
+                      }`}
+                    >
+                      <span className="text-xs font-bold">{act.day}</span>
+                      {isActive && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-0.5" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
+          {/* RIGHT COLUMN: Account Summary */}
+          <div className="space-y-8">
+            <div className="glass-card p-6 border border-white/5 space-y-4">
+              <h3 className="font-display font-extrabold text-sm uppercase tracking-wider pb-3 border-b border-white/5">
+                Account Summary
+              </h3>
+
+              <div className="space-y-3 text-xs">
+                <div className="flex justify-between items-center py-2 border-b border-white/5">
+                  <span className="text-neutral-400 font-light">Account Type:</span>
+                  <span className="font-bold text-white uppercase tracking-wider">{role === 'owner' ? 'Venue Owner' : 'Player'}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-white/5">
+                  <span className="text-neutral-400 font-light">Email Address:</span>
+                  <span className="font-bold text-neutral-300 truncate max-w-[160px]">{user?.email || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-white/5">
+                  <span className="text-neutral-400 font-light">Player ID:</span>
+                  <span className="font-bold text-indigo-400 font-mono text-xs">{editPlayerId || initialPlayerId}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Peer Reviews Teaser Card on Overview */}
+            <div className="glass-card p-6 border border-amber-500/20 bg-amber-500/[0.02] rounded-3xl space-y-3.5 text-left">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-amber-400 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Peer Reputation
+                </span>
+                <span className="text-xs font-bold text-white">4.9★</span>
+              </div>
+              <h4 className="font-display font-bold text-white text-sm">
+                Athletic Performance & Behaviour Feedback
+              </h4>
+              <p className="text-xs text-neutral-400 font-light leading-relaxed">
+                Teammates and opponents have rated your on-pitch skill, clutch mindset, and respect for referees.
+              </p>
+              <button
+                onClick={() => setActiveTab('Reviews')}
+                className="w-full py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-extrabold uppercase tracking-wider transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
+              >
+                <span>Read Peer Reviews & Badges</span>
+                <span>→</span>
+              </button>
+            </div>
+
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 4. WHATSAPP / INSTAGRAM STYLE EDIT PROFILE MODAL */}
       <AnimatePresence>
