@@ -24,9 +24,11 @@ import {
   Share2,
   Copy,
   Hash,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
-import { apiUpdateProfile, apiFetchPlayerReviews, getRatingColor } from '../services/db';
+import { apiUpdateProfile, apiFetchPlayerReviews, getRatingColor, apiDeleteAccount } from '../services/db';
+import { auth } from '../services/firebase';
 import UserAvatar from '../components/UserAvatar';
 import PlayerReviewSection from '../components/PlayerReviewSection';
 
@@ -242,71 +244,28 @@ export default function Profile({
   const [copiedId, setCopiedId] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
-  // Default Seed Written Reviews with authentic peer comments
-  const DEFAULT_INITIAL_REVIEWS = [
-    {
-      id: 'rev_1',
-      reviewer_name: 'Amit Patel',
-      reviewer_avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
-      reviewer_sport: 'Football',
-      performance_rating: 5,
-      behaviour_rating: 5,
-      badges: ['Fair Play Champion', 'Team Motivator'],
-      comment: 'Incredible energy on the pitch and great vision in midfield. Always keeps team morale high even when we were down 1-0. Exemplary fair play and zero complaining!',
-      match_context: 'Indiranagar Turf City 7v7 Friday Night League',
-      created_at: new Date(Date.now() - 86400000 * 2).toISOString()
-    },
-    {
-      id: 'rev_2',
-      reviewer_name: 'Pooja Reddy',
-      reviewer_avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200',
-      reviewer_sport: 'Badminton',
-      performance_rating: 5,
-      behaviour_rating: 5,
-      badges: ['Clutch Player', 'Always On Time'],
-      comment: 'Super reliable doubles partner! Always on time, calls honest line decisions, and has lightning-fast reflexes at the net. A true joy to team up with.',
-      match_context: 'SmashZone Badminton Arena - Doubles Clash',
-      created_at: new Date(Date.now() - 86400000 * 5).toISOString()
-    },
-    {
-      id: 'rev_3',
-      reviewer_name: 'Deepak Kumar',
-      reviewer_avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
-      reviewer_sport: 'Cricket',
-      performance_rating: 4.8,
-      behaviour_rating: 5,
-      badges: ['Deadly Precision', 'Natural Leader'],
-      comment: 'Disciplined bowling and stayed calm during the high-pressure final over. Never engages in unnecessary on-field arguments with umpires.',
-      match_context: 'Box Cricket Champions Trophy',
-      created_at: new Date(Date.now() - 86400000 * 9).toISOString()
-    },
-    {
-      id: 'rev_4',
-      reviewer_name: 'Vikram Singh',
-      reviewer_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Vikram',
-      reviewer_sport: 'Football',
-      performance_rating: 4.7,
-      behaviour_rating: 4.9,
-      badges: ['Rock-Solid Defense', 'High Work Rate'],
-      comment: 'Clean tackling and rock-solid defensive positioning. Respects referee calls without arguing. Definitely an MVP teammate on any weekend.',
-      match_context: 'Weekend 5v5 Open Turf Session',
-      created_at: new Date(Date.now() - 86400000 * 14).toISOString()
-    }
-  ];
+  // Delete Account Confirmation States
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  // Default Seed Written Reviews - only real reviews
+  const DEFAULT_INITIAL_REVIEWS = [];
 
   // Player Reviews & Overall Rating Data
   const [reviewsData, setReviewsData] = useState({
-    totalReviews: 4,
-    avgPerformance: 4.9,
+    totalReviews: 0,
+    avgPerformance: 5.0,
     avgBehaviour: 5.0,
-    overallScore: 4.9,
-    distribution: { 5: 3, 4: 1, 3: 0, 2: 0, 1: 0 },
-    reviews: DEFAULT_INITIAL_REVIEWS
+    overallScore: 5.0,
+    distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
+    reviews: []
   });
   const [showReviewsModal, setShowReviewsModal] = useState(false);
 
   useEffect(() => {
-    const targetPlayerId = user?.id || user?.firebase_uid || user?.email || 'usr_rahul';
+    const targetPlayerId = user?.id || user?.firebase_uid || user?.email || 'usr_me';
     apiFetchPlayerReviews(targetPlayerId).then(data => {
       if (data && data.success && Array.isArray(data.reviews) && data.reviews.length > 0) {
         setReviewsData(data);
@@ -627,7 +586,7 @@ export default function Profile({
                   {ratingScore}★
                 </span>
                 <span className="text-sm font-medium text-neutral-400">/ 5.0 Rating</span>
-                <span className="text-xs text-neutral-500">• Based on {reviewsData.totalReviews || 4} verified match reviews</span>
+                <span className="text-xs text-neutral-500">• Based on {reviewsData.totalReviews ?? reviewsData.reviews?.length ?? 0} verified match reviews</span>
               </div>
             </div>
 
@@ -641,7 +600,7 @@ export default function Profile({
               className="self-start sm:self-center px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/10 text-xs font-bold transition-all flex items-center space-x-2 group-hover:border-white/25 shadow-sm cursor-pointer"
             >
               <MessageSquare className="w-3.5 h-3.5 text-neutral-400 group-hover:text-white" />
-              <span>View Reviews ({reviewsData.totalReviews || 4}) →</span>
+              <span>View Reviews ({reviewsData.totalReviews ?? reviewsData.reviews?.length ?? 0}) →</span>
             </button>
           </div>
 

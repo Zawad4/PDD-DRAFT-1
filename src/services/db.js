@@ -811,25 +811,143 @@ export async function apiCheckUsernameUnique(username) {
   }
 }
 
+// Known NPC test user IDs and inaccessible fake bots that should NEVER appear in the app
+export const NPC_TEST_USER_IDS = new Set([
+  'usr_rahul',
+  'usr_priya',
+  'usr_vikram',
+  'usr_sneha',
+  'usr_karthik',
+  'usr_amit_patel',
+  'usr_7332uo2et',
+  'usr_txb1xcvak',
+  'jbTOjOIRIdS8Le6pt79ZxX9AWT53',
+  'owner123@gmail.cpm'
+]);
+
 export async function apiSearchUsers(queryStr, currentUserId = null) {
   if (!queryStr || !queryStr.trim()) return [];
-  const clean = queryStr.trim().toLowerCase().replace('@', '');
+  const rawQ = queryStr.trim().toLowerCase();
+  const cleanQ = rawQ.replace(/^@/, '');
 
+  const userMap = new Map();
+
+  const addCandidate = (u) => {
+    if (!u) return;
+    const uid = u.id || u.firebase_uid || u.uid;
+    if (!uid) return;
+    if (NPC_TEST_USER_IDS.has(uid)) return; // Exclude test NPCs and bots completely!
+    if (currentUserId && (uid === currentUserId || u.firebase_uid === currentUserId)) return;
+
+    // Filter out venue owners: only real players/athletes should appear in athlete searches
+    const userRole = (u.role || u.userRole || u.user_role || '').toLowerCase().trim();
+    if (userRole === 'owner' || userRole === 'venue_owner' || userRole === 'turf_owner' || !!u.is_owner || !!u.venue_owner) {
+      return;
+    }
+
+    const email = (u.email || '').toLowerCase().trim();
+    if (email === 'owner123@gmail.cpm' || email === 'owner123@gmail.com' || email.startsWith('owner')) return;
+
+    // Strict requirement: ONLY accounts created by Google or active users with valid email
+    const isGoogle = !!(
+      u.auth_provider === 'google' ||
+      u.is_google_user ||
+      email.endsWith('@gmail.com') ||
+      (u.avatar && u.avatar.includes('googleusercontent.com')) ||
+      (u.avatarUrl && u.avatarUrl.includes('googleusercontent.com')) ||
+      (u.avatar_url && u.avatar_url.includes('googleusercontent.com'))
+    );
+    const isActive = !!(u.is_active_user || (email && email.includes('@')));
+    if (!isGoogle && !isActive) return;
+    if (!email && !isGoogle) return;
+
+    const phone = (u.phone || '').trim();
+    const fName = (u.full_name || u.name || u.displayName || '').toLowerCase().trim();
+    const uName = (u.username || '').toLowerCase().trim();
+    const pId = (u.player_id || u.handle || (uName ? `@${uName}` : '')).toLowerCase().trim();
+    const cleanPid = pId.replace(/^@/, '');
+
+    // Match query against Name, Player ID / Handle, Username, Email, Phone
+    const matches = 
+      fName.includes(cleanQ) ||
+      uName.includes(cleanQ) ||
+      cleanPid.includes(cleanQ) ||
+      pId.includes(rawQ) ||
+      (email && email.includes(cleanQ)) ||
+      (phone && phone.includes(cleanQ)) ||
+      uid.toLowerCase().includes(cleanQ);
+
+    if (matches) {
+      const formattedPlayerId = pId 
+        ? (pId.startsWith('@') ? pId : `@${pId}`) 
+        : `@${(fName || 'player').replace(/[^a-z0-9]/g, '')}_${String(uid).slice(-4)}`;
+
+      userMap.set(uid, {
+        id: uid,
+        uid: uid,
+        firebase_uid: uid,
+        name: u.full_name || u.displayName || u.name || (email ? email.split('@')[0] : 'Athlete'),
+        full_name: u.full_name || u.displayName || u.name || (email ? email.split('@')[0] : 'Athlete'),
+        displayName: u.displayName || u.full_name || u.name || 'Athlete',
+        player_id: formattedPlayerId,
+        handle: formattedPlayerId,
+        username: u.username || cleanPid || (email ? email.split('@')[0] : 'athlete'),
+        email: email,
+        phone: phone,
+        avatar: u.avatar || u.avatarUrl || u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`,
+        avatarUrl: u.avatarUrl || u.avatar || u.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`,
+        role: u.role || 'player',
+        sport: u.sport || (Array.isArray(u.sports_interests) ? u.sports_interests[0] : 'Multi-Sport'),
+        location: u.location || u.city || 'Chennai, India',
+        city: u.city || 'Chennai',
+        auth_provider: u.auth_provider || 'email',
+        is_google_user: !!(u.is_google_user || u.auth_provider === 'google' || (email && email.endsWith('@gmail.com')))
+      });
+    }
+  };
+
+  // 1. Search local accounts and profiles
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const rawAccounts = localStorage.getItem('turfington_accounts');
+      if (rawAccounts) {
+        Object.values(JSON.parse(rawAccounts)).forEach(addCandidate);
+      }
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('turfington_saved_profiles') || key === 'turfington_all_profiles')) {
+          try {
+            const arr = JSON.parse(localStorage.getItem(key) || '[]');
+            if (Array.isArray(arr)) arr.forEach(addCandidate);
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Search Express backend
+  try {
+    const res = await fetch('http://localhost:5000/api/users');
+    if (res.ok) {
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.users || []);
+      list.forEach(addCandidate);
+    }
+  } catch {}
+
+  // 3. Search Firestore profiles collection
   try {
     const snap = await getDocs(collection(db, 'profiles'));
-    const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    snap.docs.forEach(d => addCandidate({ id: d.id, ...d.data() }));
+  } catch (err) {}
 
-    return users.filter(u => {
-      if (currentUserId && (u.id === currentUserId || u.firebase_uid === currentUserId)) return false;
-      const uName = (u.username || '').toLowerCase();
-      const fName = (u.full_name || u.name || '').toLowerCase();
-      const email = (u.email || '').toLowerCase();
-      return uName.includes(clean) || fName.includes(clean) || email.includes(clean);
-    });
-  } catch (err) {
-    console.warn('apiSearchUsers Firestore error:', err);
-    return [];
-  }
+  // 4. Search Firestore users collection
+  try {
+    const snap = await getDocs(collection(db, 'users'));
+    snap.docs.forEach(d => addCandidate({ id: d.id, ...d.data() }));
+  } catch (err) {}
+
+  return Array.from(userMap.values());
 }
 
 export async function apiFetchNearbyPlayers(lat, lng, radiusKm = 50, currentUserId = null) {
@@ -837,12 +955,8 @@ export async function apiFetchNearbyPlayers(lat, lng, radiusKm = 50, currentUser
   const userLng = lng || 80.2707;
 
   try {
-    const snap = await getDocs(collection(db, 'profiles'));
-    let data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    if (currentUserId) {
-      data = data.filter(p => p.id !== currentUserId && p.firebase_uid !== currentUserId);
-    }
+    // 1. Fetch ALL registered athletes and user accounts across Firestore, Express backend, and localStorage
+    const allUsers = await apiFetchAthletes(currentUserId);
 
     const toRad = (v) => (v * Math.PI) / 180;
     const haversineDist = (lat1, lon1, lat2, lon2) => {
@@ -856,21 +970,24 @@ export async function apiFetchNearbyPlayers(lat, lng, radiusKm = 50, currentUser
       return parseFloat((R * c).toFixed(1));
     };
 
-    return data
-      .map(p => {
-        const pLat = p.lat || 13.0741;
-        const pLng = p.lng || 80.2326;
-        const distNum = haversineDist(userLat, userLng, pLat, pLng);
-        return {
-          ...p,
-          lat: pLat,
-          lng: pLng,
-          distanceNum: distNum,
-          distanceText: `${distNum} km away`
-        };
-      })
-      .filter(p => p.distanceNum <= radiusKm)
-      .sort((a, b) => a.distanceNum - b.distanceNum);
+    // Calculate distance for all registered users
+    const mapped = allUsers.map((p, idx) => {
+      const pLat = parseFloat(p.lat || p.latitude) || (userLat + (idx * 0.01 + 0.01));
+      const pLng = parseFloat(p.lng || p.longitude) || (userLng + (idx * 0.01 + 0.01));
+      const distNum = haversineDist(userLat, userLng, pLat, pLng);
+      return {
+        ...p,
+        lat: pLat,
+        lng: pLng,
+        distanceNum: distNum,
+        distanceText: p.location ? `${p.location}` : `${distNum} km away`
+      };
+    });
+
+    // Sort by distance (closest first)
+    mapped.sort((a, b) => (a.distanceNum || 0) - (b.distanceNum || 0));
+
+    return mapped;
   } catch (err) {
     console.warn('apiFetchNearbyPlayers error:', err);
     return [];
@@ -988,21 +1105,22 @@ export const DEFAULT_COMMUNITY_GROUPS = [
     sport: 'Football',
     type: 'group',
     is_public: true,
-    avatar: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=600',
+    avatar: '/football_group.jpg',
+    imageUrl: '/football_group.jpg',
     description: 'Weekly 7v7 turf matches, tactical meetups, and friendly amateur leagues across Chennai.',
-    participants: ['usr_amit_patel', 'usr_rahul', 'usr_priya'],
+    participants: ['turfington_official'],
     members_count: 48,
-    created_by: 'usr_amit_patel',
+    created_by: 'turfington_official',
     lastMessage: {
-      text: 'Anyone up for 7v7 this Friday 7 PM at Astro Turf?',
-      sender_id: 'usr_rahul',
-      sender_name: 'Rahul Sharma',
+      text: 'Welcome to Chennai Football Turf Hub! Share match plans, assemble squads, and book turfs.',
+      sender_id: 'turfington_official',
+      sender_name: 'Turfington Community',
       timestamp: Date.now() - 1000 * 60 * 15
     },
-    lastMessageText: 'Anyone up for 7v7 this Friday 7 PM at Astro Turf?',
-    lastMessageSender: 'Rahul Sharma',
+    lastMessageText: 'Welcome to Chennai Football Turf Hub! Share match plans, assemble squads, and book turfs.',
+    lastMessageSender: 'Turfington Community',
     lastMessageTime: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-    unreadCounts: { usr_amit_patel: 0 }
+    unreadCounts: {}
   },
   {
     id: 'group_box_cricket',
@@ -1010,21 +1128,22 @@ export const DEFAULT_COMMUNITY_GROUPS = [
     sport: 'Cricket',
     type: 'group',
     is_public: true,
-    avatar: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?q=80&w=600',
+    avatar: '/cricket_group.jpg',
+    imageUrl: '/cricket_group.jpg',
     description: 'Fast-paced box cricket tournaments, night matches, and weekend nets. Batsmen & bowlers welcome!',
-    participants: ['usr_amit_patel', 'usr_rahul'],
+    participants: ['turfington_official'],
     members_count: 62,
-    created_by: 'usr_rahul',
+    created_by: 'turfington_official',
     lastMessage: {
-      text: 'Need 2 more players for tomorrow night box cricket at Turf Together!',
-      sender_id: 'usr_priya',
-      sender_name: 'Priya Sharma',
+      text: 'Looking for box cricket players? Connect with teams and arrange weekend matches here!',
+      sender_id: 'turfington_official',
+      sender_name: 'Turfington Community',
       timestamp: Date.now() - 1000 * 60 * 45
     },
-    lastMessageText: 'Need 2 more players for tomorrow night box cricket at Turf Together!',
-    lastMessageSender: 'Priya Sharma',
+    lastMessageText: 'Looking for box cricket players? Connect with teams and arrange weekend matches here!',
+    lastMessageSender: 'Turfington Community',
     lastMessageTime: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-    unreadCounts: { usr_amit_patel: 1 }
+    unreadCounts: {}
   },
   {
     id: 'group_badminton_smashers',
@@ -1032,21 +1151,22 @@ export const DEFAULT_COMMUNITY_GROUPS = [
     sport: 'Badminton',
     type: 'group',
     is_public: true,
-    avatar: 'https://images.unsplash.com/photo-1521537634581-0ddea2ffe31a?q=80&w=600',
+    avatar: '/badminton_group.jpg',
+    imageUrl: '/badminton_group.jpg',
     description: 'Wooden and synthetic court doubles, high-intensity rallies, and morning coaching sessions.',
-    participants: ['usr_amit_patel'],
+    participants: ['turfington_official'],
     members_count: 35,
-    created_by: 'usr_amit_patel',
+    created_by: 'turfington_official',
     lastMessage: {
-      text: 'Court 3 booked for Sunday morning 7 AM. Who is joining for doubles?',
-      sender_id: 'usr_amit_patel',
-      sender_name: 'Amit Patel',
+      text: 'Smashers Badminton Club: Find doubles partners and organize court sessions.',
+      sender_id: 'turfington_official',
+      sender_name: 'Turfington Community',
       timestamp: Date.now() - 1000 * 60 * 120
     },
-    lastMessageText: 'Court 3 booked for Sunday morning 7 AM. Who is joining for doubles?',
-    lastMessageSender: 'Amit Patel',
+    lastMessageText: 'Smashers Badminton Club: Find doubles partners and organize court sessions.',
+    lastMessageSender: 'Turfington Community',
     lastMessageTime: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-    unreadCounts: { usr_amit_patel: 0 }
+    unreadCounts: {}
   },
   {
     id: 'group_pickleball_padel',
@@ -1056,19 +1176,19 @@ export const DEFAULT_COMMUNITY_GROUPS = [
     is_public: true,
     avatar: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?q=80&w=600',
     description: 'Chennai’s premier racket community. Discover paddle sports, casual doubles, and coaching drills.',
-    participants: ['usr_rahul', 'usr_priya'],
+    participants: ['turfington_official'],
     members_count: 27,
-    created_by: 'usr_priya',
+    created_by: 'turfington_official',
     lastMessage: {
-      text: 'New outdoor pickleball court open in Anna Nagar! Let us test it out.',
-      sender_id: 'usr_priya',
-      sender_name: 'Priya Sharma',
+      text: 'Welcome paddle & pickleball enthusiasts! Find partners and discuss the fastest growing sports.',
+      sender_id: 'turfington_official',
+      sender_name: 'Turfington Community',
       timestamp: Date.now() - 1000 * 60 * 240
     },
-    lastMessageText: 'New outdoor pickleball court open in Anna Nagar! Let us test it out.',
-    lastMessageSender: 'Priya Sharma',
+    lastMessageText: 'Welcome paddle & pickleball enthusiasts! Find partners and discuss the fastest growing sports.',
+    lastMessageSender: 'Turfington Community',
     lastMessageTime: new Date(Date.now() - 1000 * 60 * 240).toISOString(),
-    unreadCounts: { usr_amit_patel: 0 }
+    unreadCounts: {}
   },
   {
     id: 'group_table_tennis',
@@ -1078,19 +1198,19 @@ export const DEFAULT_COMMUNITY_GROUPS = [
     is_public: true,
     avatar: 'https://images.unsplash.com/photo-1611251135345-18c56206b863?q=80&w=600',
     description: 'Ping pong enthusiasts, spin-masters, and local tournament coordination.',
-    participants: ['usr_amit_patel'],
+    participants: ['turfington_official'],
     members_count: 19,
-    created_by: 'usr_amit_patel',
+    created_by: 'turfington_official',
     lastMessage: {
-      text: 'Practicing backhand loops tonight at 8 PM at Elite TT Club.',
-      sender_id: 'usr_amit_patel',
-      sender_name: 'Amit Patel',
+      text: 'Practice loops, rallies, and weekly table tennis matchups across city centers.',
+      sender_id: 'turfington_official',
+      sender_name: 'Turfington Community',
       timestamp: Date.now() - 1000 * 60 * 360
     },
-    lastMessageText: 'Practicing backhand loops tonight at 8 PM at Elite TT Club.',
-    lastMessageSender: 'Amit Patel',
+    lastMessageText: 'Practice loops, rallies, and weekly table tennis matchups across city centers.',
+    lastMessageSender: 'Turfington Community',
     lastMessageTime: new Date(Date.now() - 1000 * 60 * 360).toISOString(),
-    unreadCounts: { usr_amit_patel: 0 }
+    unreadCounts: {}
   },
   {
     id: 'group_strike_bowling',
@@ -1100,19 +1220,19 @@ export const DEFAULT_COMMUNITY_GROUPS = [
     is_public: true,
     avatar: 'https://images.unsplash.com/photo-1545232979-fbf68fe9b10d?q=80&w=600',
     description: '10-pin bowling nights, high score leaderboards, and weekend squad socials.',
-    participants: ['usr_rahul'],
+    participants: ['turfington_official'],
     members_count: 22,
-    created_by: 'usr_rahul',
+    created_by: 'turfington_official',
     lastMessage: {
-      text: 'Who has a score above 180? Team challenge this Saturday!',
-      sender_id: 'usr_rahul',
-      sender_name: 'Rahul Sharma',
+      text: 'Strike Bowling Squad: Coordinate weekend 10-pin sessions and team tournaments!',
+      sender_id: 'turfington_official',
+      sender_name: 'Turfington Community',
       timestamp: Date.now() - 1000 * 60 * 480
     },
-    lastMessageText: 'Who has a score above 180? Team challenge this Saturday!',
-    lastMessageSender: 'Rahul Sharma',
+    lastMessageText: 'Strike Bowling Squad: Coordinate weekend 10-pin sessions and team tournaments!',
+    lastMessageSender: 'Turfington Community',
     lastMessageTime: new Date(Date.now() - 1000 * 60 * 480).toISOString(),
-    unreadCounts: { usr_amit_patel: 0 }
+    unreadCounts: {}
   }
 ];
 
@@ -1621,13 +1741,24 @@ export async function apiMarkMessagesAsRead(conversationId, userId) {
 
 export async function apiFetchAthletes(currentUserId) {
   try {
-    const list = [];
     const seenMap = new Map();
 
     const addOrUpdateUser = (userData) => {
       if (!userData) return;
       const uid = userData.firebase_uid || userData.id || userData.uid;
+      if (!uid) return;
+      if (NPC_TEST_USER_IDS.has(uid)) return; // Exclude test NPCs completely!
+      if (currentUserId && (uid === currentUserId || userData.firebase_uid === currentUserId)) return;
+
+      // Filter out venue owners: only player profiles should show up under find athletes/chat
+      const userRole = (userData.role || userData.userRole || userData.user_role || '').toLowerCase().trim();
+      if (userRole === 'owner' || userRole === 'venue_owner' || userRole === 'turf_owner' || !!userData.is_owner || !!userData.venue_owner) {
+        return;
+      }
+
       const email = (userData.email || '').toLowerCase().trim();
+      if (email === 'owner123@gmail.cpm' || email === 'owner123@gmail.com' || email.startsWith('owner')) return;
+
       const lookupKey = uid || email;
       if (!lookupKey) return;
 
@@ -1639,20 +1770,35 @@ export async function apiFetchAthletes(currentUserId) {
         (userData.avatarUrl && userData.avatarUrl.includes('googleusercontent.com')) ||
         (userData.avatar_url && userData.avatar_url.includes('googleusercontent.com'))
       );
+      const isActive = !!(userData.is_active_user || (email && email.includes('@')));
+
+      // Strict requirement: ONLY accounts created by Google or real active users with valid email
+      if (!isGoogle && !isActive) return;
+      if (!email && !isGoogle) return;
+
+      const fName = userData.full_name || userData.displayName || userData.name || (email ? email.split('@')[0] : 'Athlete');
+      const uName = userData.username || (userData.name ? userData.name.toLowerCase().replace(/[^a-z0-9_]/g, '') : (email ? email.split('@')[0] : 'athlete'));
+      const pId = userData.player_id || userData.handle || (uName ? `@${uName.replace(/[^a-z0-9_]/g, '')}` : `@athlete_${String(uid).slice(-4)}`);
+      const formattedPlayerId = pId.startsWith('@') ? pId : `@${pId}`;
 
       const normalized = {
         id: uid,
         uid: uid,
         firebase_uid: uid,
-        name: userData.full_name || userData.displayName || userData.name || (email ? email.split('@')[0] : 'Athlete'),
-        full_name: userData.full_name || userData.displayName || userData.name || (email ? email.split('@')[0] : 'Athlete'),
-        displayName: userData.displayName || userData.full_name || userData.name || 'Athlete',
+        name: fName,
+        full_name: fName,
+        displayName: fName,
+        player_id: formattedPlayerId,
+        handle: formattedPlayerId,
+        username: uName,
         email: email,
+        phone: userData.phone || '',
         avatar: userData.avatar || userData.avatarUrl || userData.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`,
         avatarUrl: userData.avatarUrl || userData.avatar || userData.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`,
         role: userData.role || 'player',
         sport: userData.sport || (Array.isArray(userData.sports_interests) ? userData.sports_interests[0] : 'Multi-Sport'),
-        location: userData.location || 'Chennai, India',
+        location: userData.location || userData.city || 'Chennai, India',
+        city: userData.city || 'Chennai',
         auth_provider: isGoogle ? 'google' : (userData.auth_provider || 'email'),
         is_google_user: isGoogle,
         lastActive: userData.updatedAt || userData.updated_at || new Date().toISOString()
@@ -1713,20 +1859,14 @@ export async function apiFetchAthletes(currentUserId) {
       }
     } catch {}
 
-    // 5. Default high-quality athletes for instant discovery & direct messaging
-    const fallbackAthletes = [
-      { id: 'usr_rahul', name: 'Rahul Sharma', full_name: 'Rahul Sharma', sport: 'Football & Cricket', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Rahul', role: 'player', location: 'Indiranagar', is_google_user: true, auth_provider: 'google', email: 'rahul.athlete@gmail.com' },
-      { id: 'usr_priya', name: 'Priya Sharma', full_name: 'Priya Sharma', sport: 'Badminton & Pickleball', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Priya', role: 'owner', location: 'Porur, Chennai', is_google_user: true, auth_provider: 'google', email: 'priya.turf@gmail.com' },
-      { id: 'usr_vikram', name: 'Vikram Rao', full_name: 'Vikram Rao', sport: 'Football', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Vikram', role: 'player', location: 'Anna Nagar, Chennai', is_google_user: true, auth_provider: 'google', email: 'vikram.striker@gmail.com' },
-      { id: 'usr_sneha', name: 'Sneha Reddy', full_name: 'Sneha Reddy', sport: 'Tennis & Badminton', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sneha', role: 'player', location: 'T. Nagar, Chennai', is_google_user: false, auth_provider: 'email', email: 'sneha.reddy@turfington.com' },
-      { id: 'usr_karthik', name: 'Karthik Subramanian', full_name: 'Karthik Subramanian', sport: 'Box Cricket', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Karthik', role: 'player', location: 'Velachery, Chennai', is_google_user: true, auth_provider: 'google', email: 'karthik.cricket@gmail.com' }
-    ];
-
-    fallbackAthletes.forEach(fa => addOrUpdateUser(fa));
-
+    // NO NPC TEST USERS & NO OWNERS: Filter strictly to real registered athletes
     const finalUsers = Array.from(seenMap.values()).filter(u => {
       const matchId = u.id === currentUserId || u.firebase_uid === currentUserId;
-      return !matchId;
+      const userRole = (u.role || u.userRole || u.user_role || '').toLowerCase().trim();
+      const isOwner = userRole === 'owner' || userRole === 'venue_owner' || userRole === 'turf_owner' || !!u.is_owner || !!u.venue_owner;
+      const email = (u.email || '').toLowerCase().trim();
+      const isOwnerEmail = email === 'owner123@gmail.cpm' || email === 'owner123@gmail.com' || email.startsWith('owner');
+      return !matchId && !NPC_TEST_USER_IDS.has(u.id) && !isOwner && !isOwnerEmail;
     });
 
     // Prioritize Google-signed-in users first
@@ -1758,22 +1898,28 @@ export async function apiSearchGoogleAthletes(searchQuery, currentUserId) {
 
   // If searching by email and not in the pre-loaded list, attempt live Firestore lookup
   if (q.includes('@') && !filtered.some(u => (u.email || '').toLowerCase() === q)) {
+    if (q === 'owner123@gmail.cpm' || q === 'owner123@gmail.com' || q.startsWith('owner')) {
+      return filtered;
+    }
     try {
       const qUsers = query(collection(db, 'users'), where('email', '==', q));
       const snapUsers = await getDocs(qUsers);
       if (!snapUsers.empty) {
         snapUsers.forEach(d => {
+          const dData = d.data() || {};
+          const dRole = (dData.role || dData.userRole || dData.user_role || '').toLowerCase().trim();
+          if (dRole === 'owner' || dRole === 'venue_owner' || dRole === 'turf_owner' || !!dData.is_owner || !!dData.venue_owner) return;
           filtered.push({
             id: d.id,
             uid: d.id,
             firebase_uid: d.id,
-            ...d.data(),
+            ...dData,
             auth_provider: 'google',
             is_google_user: true
           });
         });
       } else {
-        // Direct email invite representation
+        // Direct email invite representation - only for non-owner emails
         const sanitizedId = 'usr_email_' + q.replace(/[^a-zA-Z0-9]/g, '_');
         filtered.push({
           id: sanitizedId,
@@ -2149,13 +2295,13 @@ export async function apiFetchVenues(filters = {}) {
       image_url: resolvedImage,
       image: resolvedImage,
       rating: v.rating || 5.0,
-      owner_id: v.owner_id || 'usr_priya'
+      owner_id: v.owner_id || v.ownerId || null
     });
   });
 
   let allVenues = Array.from(map.values());
   if (filters.ownerId) {
-    allVenues = allVenues.filter(v => v.owner_id === filters.ownerId);
+    allVenues = allVenues.filter(v => v.owner_id === filters.ownerId || v.ownerId === filters.ownerId);
   }
   return allVenues;
 }
@@ -2449,42 +2595,124 @@ export async function apiDeleteVenue(venueId) {
 // -- 5. Bookings ---------------------------------------------
 
 export async function apiFetchBookings(userId) {
+  const targetUserId = typeof userId === 'object' && userId !== null 
+    ? (userId.userId || userId.user_id || userId.id || userId.uid) 
+    : userId;
+
   let localBookings = [];
+  if (targetUserId) {
+    try {
+      const sU = localStorage.getItem(`turfington_user_bookings_${targetUserId}`);
+      if (sU) {
+        const pU = JSON.parse(sU);
+        if (Array.isArray(pU)) localBookings = [...pU];
+      }
+    } catch {}
+  }
+
   try {
-    const s = localStorage.getItem('turfington_user_bookings');
-    if (s) localBookings = JSON.parse(s);
+    const s1 = localStorage.getItem('turfington_user_bookings');
+    if (s1) {
+      const p1 = JSON.parse(s1);
+      if (Array.isArray(p1)) {
+        const filtered = targetUserId ? p1.filter(b => b.user_id === targetUserId || b.userId === targetUserId) : p1;
+        localBookings = [...localBookings, ...filtered];
+      }
+    }
+  } catch {}
+
+  try {
+    const s2 = localStorage.getItem('turfington_bookings');
+    if (s2) {
+      const p2 = JSON.parse(s2);
+      if (Array.isArray(p2)) {
+        const filtered = targetUserId ? p2.filter(b => b.user_id === targetUserId || b.userId === targetUserId) : p2;
+        localBookings = [...localBookings, ...filtered];
+      }
+    }
   } catch {}
 
   let dbBookings = [];
-  try {
-    const q = query(collection(db, 'bookings'), where('user_id', '==', userId));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      dbBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  if (targetUserId && typeof targetUserId === 'string' && targetUserId.trim() !== '') {
+    try {
+      const q = query(collection(db, 'bookings'), where('user_id', '==', targetUserId.trim()));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        dbBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+    } catch (err) {
+      console.warn('apiFetchBookings Firestore error:', err);
     }
-  } catch (err) {
-    console.warn('apiFetchBookings Firestore error:', err);
   }
 
   const map = new Map();
-  [...dbBookings, ...localBookings].forEach(b => map.set(b.id, b));
+  [...dbBookings, ...localBookings].forEach(b => {
+    if (b && b.id) {
+      if (!targetUserId || b.user_id === targetUserId || b.userId === targetUserId) {
+        map.set(String(b.id), b);
+      }
+    }
+  });
   return Array.from(map.values());
 }
 
 export async function apiCreateBooking(bookingData) {
+  const bookingId = bookingData.id || 'bk_' + Date.now();
+  const venueTitle = bookingData.venue || bookingData.venue_name || bookingData.title || 'Sports Arena';
+  const rawTime = bookingData.time || bookingData.slot_time || 'Today, Flexible Slot';
+  const rawDate = bookingData.date || (rawTime.includes(',') ? rawTime.split(',')[0].trim() : 'Today');
+
   const newBooking = {
-    id: bookingData.id || 'bk_' + Date.now(),
-    created_at: new Date().toISOString(),
+    id: bookingId,
+    created_at: bookingData.created_at || new Date().toISOString(),
     status: bookingData.status || 'PENDING OWNER APPROVAL',
-    rejection_reason: null,
+    rejection_reason: bookingData.rejection_reason || null,
+    venue: venueTitle,
+    venue_name: venueTitle,
+    title: venueTitle,
+    sport: bookingData.sport || 'Football',
+    time: rawTime,
+    slot_time: rawTime,
+    date: rawDate,
+    price: bookingData.price || '₹1,200',
+    image: bookingData.image || bookingData.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=400',
+    user_id: bookingData.user_id || bookingData.userId || 'usr_guest',
+    user_name: bookingData.user_name || bookingData.player_name || 'Player',
+    player_name: bookingData.player_name || bookingData.user_name || 'Player',
+    player_phone: bookingData.player_phone || '',
+    owner_id: bookingData.owner_id || bookingData.ownerId || 'usr_venue_owner',
+    owner_name: bookingData.owner_name || bookingData.ownerName || venueTitle,
+    payment_type: bookingData.payment_type || bookingData.paymentType || 'pay_at_venue',
+    payment_status: bookingData.payment_status || bookingData.paymentStatus || 'pending_at_venue',
     ...bookingData
   };
+
+  if (newBooking.user_id) {
+    try {
+      const uKey = `turfington_user_bookings_${newBooking.user_id}`;
+      const sU = localStorage.getItem(uKey);
+      const existingU = sU ? JSON.parse(sU) : [];
+      const updatedU = [newBooking, ...existingU.filter(b => b.id !== newBooking.id)];
+      localStorage.setItem(uKey, JSON.stringify(updatedU));
+    } catch {}
+  }
 
   try {
     const s = localStorage.getItem('turfington_user_bookings');
     const existing = s ? JSON.parse(s) : [];
-    const updated = [newBooking, ...existing];
+    const updated = [newBooking, ...existing.filter(b => b.id !== newBooking.id)];
     localStorage.setItem('turfington_user_bookings', JSON.stringify(updated));
+  } catch {}
+
+  try {
+    const s2 = localStorage.getItem('turfington_bookings');
+    const existing2 = s2 ? JSON.parse(s2) : [];
+    const updated2 = [newBooking, ...existing2.filter(b => b.id !== newBooking.id)];
+    localStorage.setItem('turfington_bookings', JSON.stringify(updated2));
+  } catch {}
+
+  try {
+    window.dispatchEvent(new CustomEvent('turfington_booking_created', { detail: newBooking }));
   } catch {}
 
   addDoc(collection(db, 'bookings'), {
@@ -2511,6 +2739,24 @@ export async function apiUpdateBookingStatus(bookingId, status, rejectionReason 
     }
   } catch {}
 
+  try {
+    const s2 = localStorage.getItem('turfington_bookings');
+    if (s2) {
+      const existing2 = JSON.parse(s2);
+      const updated2 = existing2.map(b => {
+        if (b.id === bookingId) {
+          return { ...b, status, rejection_reason: rejectionReason, updated_at: new Date().toISOString() };
+        }
+        return b;
+      });
+      localStorage.setItem('turfington_bookings', JSON.stringify(updated2));
+    }
+  } catch {}
+
+  try {
+    window.dispatchEvent(new CustomEvent('turfington_booking_updated', { detail: { bookingId, status, rejectionReason } }));
+  } catch {}
+
   // 2. Update Firestore
   try {
     const q = query(collection(db, 'bookings'), where('id', '==', bookingId));
@@ -2531,25 +2777,48 @@ export async function apiUpdateBookingStatus(bookingId, status, rejectionReason 
 }
 
 export async function apiFetchOwnerBookings(ownerId) {
+  const targetOwnerId = typeof ownerId === 'object' && ownerId !== null
+    ? (ownerId.ownerId || ownerId.owner_id || ownerId.id || ownerId.uid)
+    : ownerId;
+
   let localBookings = [];
   try {
-    const s = localStorage.getItem('turfington_user_bookings');
-    if (s) localBookings = JSON.parse(s);
+    const s1 = localStorage.getItem('turfington_user_bookings');
+    if (s1) {
+      const p1 = JSON.parse(s1);
+      if (Array.isArray(p1)) localBookings = [...localBookings, ...p1];
+    }
+  } catch {}
+
+  try {
+    const s2 = localStorage.getItem('turfington_bookings');
+    if (s2) {
+      const p2 = JSON.parse(s2);
+      if (Array.isArray(p2)) localBookings = [...localBookings, ...p2];
+    }
   } catch {}
 
   let dbBookings = [];
-  try {
-    const q = query(collection(db, 'bookings'), where('owner_id', '==', ownerId));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      dbBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    }
-  } catch (err) {}
+  if (targetOwnerId && typeof targetOwnerId === 'string' && targetOwnerId.trim() !== '') {
+    try {
+      const q = query(collection(db, 'bookings'), where('owner_id', '==', targetOwnerId.trim()));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        dbBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+    } catch (err) {}
+  }
 
   const map = new Map();
   [...dbBookings, ...localBookings].forEach(b => {
-    if (b.owner_id === ownerId || b.ownerId === ownerId || !ownerId) {
-      map.set(b.id, b);
+    if (b && b.id) {
+      if (targetOwnerId) {
+        if (b.owner_id === targetOwnerId || b.ownerId === targetOwnerId) {
+          map.set(String(b.id), b);
+        }
+      } else {
+        map.set(String(b.id), b);
+      }
     }
   });
 
@@ -2890,13 +3159,40 @@ export async function apiDeleteMarketplaceItem(itemId) {
 
 
 export async function apiGetEmailByUsername(username) {
+  if (!username) return null;
+  const cleanU = String(username).trim().toLowerCase().replace(/^@/, '');
+
+  // 1. Check local storage profiles & accounts
   try {
-    const q = query(collection(db, 'profiles'), where('username', '==', username), limit(1));
+    const pKeys = ['turfington_saved_profiles', 'turfington_profiles', 'turfington_accounts', 'turfington_registered_users'];
+    for (const key of pKeys) {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const list = Array.isArray(parsed) ? parsed : Object.values(parsed);
+        const match = list.find(p => String(p?.username || '').trim().toLowerCase() === cleanU && p?.email);
+        if (match && match.email) return match.email.trim().toLowerCase();
+      }
+    }
+  } catch {}
+
+  // 2. Check Firestore
+  try {
+    const q = query(collection(db, 'profiles'), where('username', '==', cleanU), limit(1));
     const snap = await getDocs(q);
     if (!snap.empty) {
-      return snap.docs[0].data().email;
+      return snap.docs[0].data().email?.trim()?.toLowerCase();
     }
   } catch (err) {}
+
+  try {
+    const q2 = query(collection(db, 'profiles'), where('username', '==', username.trim()), limit(1));
+    const snap2 = await getDocs(q2);
+    if (!snap2.empty) {
+      return snap2.docs[0].data().email?.trim()?.toLowerCase();
+    }
+  } catch (err) {}
+
   return null;
 }
 
@@ -2922,83 +3218,17 @@ export async function apiFetchPlayerReviews(playerId) {
     if (cached) return JSON.parse(cached);
   } catch {}
 
-  const SEED_FALLBACK_REVIEWS = [
-    {
-      id: 'rev_1',
-      player_id: playerId,
-      reviewer_id: 'usr_amit',
-      reviewer_name: 'Amit Patel',
-      reviewer_avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
-      reviewer_sport: 'Football',
-      performance_rating: 5,
-      behaviour_rating: 5,
-      badges: ['Fair Play Champion', 'Team Motivator'],
-      comment: 'Incredible energy on the pitch and great vision in midfield. Always keeps team morale high even when we were down 1-0. Exemplary fair play and zero complaining!',
-      match_context: 'Indiranagar Turf City 7v7 Friday Night League',
-      helpful_count: 8,
-      helpful_users: ['usr_pooja', 'usr_deepak'],
-      created_at: new Date(Date.now() - 86400000 * 2).toISOString()
-    },
-    {
-      id: 'rev_2',
-      player_id: playerId,
-      reviewer_id: 'usr_pooja',
-      reviewer_name: 'Pooja Reddy',
-      reviewer_avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200',
-      reviewer_sport: 'Badminton',
-      performance_rating: 5,
-      behaviour_rating: 5,
-      badges: ['Clutch Player', 'Always On Time'],
-      comment: 'Super reliable doubles partner! Always on time, calls honest line decisions, and has lightning-fast reflexes at the net. A true joy to team up with.',
-      match_context: 'SmashZone Badminton Arena - Doubles Clash',
-      helpful_count: 6,
-      helpful_users: ['usr_amit'],
-      created_at: new Date(Date.now() - 86400000 * 5).toISOString()
-    },
-    {
-      id: 'rev_3',
-      player_id: playerId,
-      reviewer_id: 'usr_deepak',
-      reviewer_name: 'Deepak Kumar',
-      reviewer_avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
-      reviewer_sport: 'Cricket',
-      performance_rating: 4.8,
-      behaviour_rating: 5,
-      badges: ['Deadly Precision', 'Natural Leader'],
-      comment: 'Disciplined bowling and stayed calm during the high-pressure final over. Never engages in unnecessary on-field arguments with umpires.',
-      match_context: 'Box Cricket Champions Trophy',
-      helpful_count: 4,
-      helpful_users: [],
-      created_at: new Date(Date.now() - 86400000 * 9).toISOString()
-    },
-    {
-      id: 'rev_4',
-      player_id: playerId,
-      reviewer_id: 'usr_vikram',
-      reviewer_name: 'Vikram Singh',
-      reviewer_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Vikram',
-      reviewer_sport: 'Football',
-      performance_rating: 4.7,
-      behaviour_rating: 4.9,
-      badges: ['Rock-Solid Defense', 'High Work Rate'],
-      comment: 'Clean tackling and rock-solid defensive positioning. Respects referee calls without arguing. Definitely an MVP teammate on any weekend.',
-      match_context: 'Weekend 5v5 Open Turf Session',
-      helpful_count: 5,
-      helpful_users: [],
-      created_at: new Date(Date.now() - 86400000 * 14).toISOString()
-    }
-  ];
-
+  // When no reviews exist yet for this user in the database or cache, return clean empty state
   return {
     success: true,
     playerId,
-    totalReviews: SEED_FALLBACK_REVIEWS.length,
-    avgPerformance: 4.9,
+    totalReviews: 0,
+    avgPerformance: 5.0,
     avgBehaviour: 5.0,
-    overallScore: 4.9,
-    distribution: { 5: 3, 4: 1, 3: 0, 2: 0, 1: 0 },
-    badgeCounts: { 'Fair Play Champion': 14, 'Clutch Player': 11, 'Always On Time': 9, 'Team Motivator': 8 },
-    reviews: SEED_FALLBACK_REVIEWS
+    overallScore: 5.0,
+    distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
+    badgeCounts: {},
+    reviews: []
   };
 }
 

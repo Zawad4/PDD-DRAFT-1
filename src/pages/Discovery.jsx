@@ -5,11 +5,11 @@ import {
   Clock, Trophy, Users, Star, Lock, Loader2,
   UserPlus, UserCheck, MessageCircle, Medal, ChevronRight,
   Navigation, Wifi, WifiOff, RefreshCw, CreditCard, Check, Compass,
-  Heart, Share2, MessageSquare, X
+  Heart, Share2, MessageSquare, X, CheckCircle, XCircle
 } from 'lucide-react';
 import SportIcon from '../components/SportIcon';
 import VenueImage from '../components/VenueImage';
-import { apiFetchTurfs, apiFetchNearbyTurfs, apiCreateBooking, apiFetchNearbyPlayers, apiSearchUsers, apiFollowUser, apiCreateDirectChat, apiSubscribeVenues, apiCreateHostedMatch, apiFetchHostedMatches, apiJoinHostedMatch, apiLeaveHostedMatch } from '../services/db';
+import { apiFetchTurfs, apiFetchNearbyTurfs, apiCreateBooking, apiUpdateBookingStatus, apiFetchNearbyPlayers, apiSearchUsers, apiFollowUser, apiCreateDirectChat, apiSubscribeVenues, apiCreateHostedMatch, apiFetchHostedMatches, apiJoinHostedMatch, apiLeaveHostedMatch } from '../services/db';
 import { openRazorpayCheckout } from '../services/razorpay';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
 
@@ -49,7 +49,9 @@ export default function Discovery({
   user,
   initialSport = 'All',
   setInitialSport,
-  venueOffers = []
+  venueOffers = [],
+  setTab = null,
+  onStartChat = null
 }) {
   const [selectedDealsVenue, setSelectedDealsVenue] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,6 +73,95 @@ export default function Discovery({
   const [selectedSportPreset, setSelectedSportPreset] = useState('Football');
   const [hostingSkillLevel, setHostingSkillLevel] = useState('All Levels Welcome');
   const [hostedMatchesList, setHostedMatchesList] = useState([]);
+  const [bookingCelebrationData, setBookingCelebrationData] = useState(null);
+
+  // Live session booked venues tracking (immediate reflection on card)
+  const [sessionBookedVenues, setSessionBookedVenues] = useState(() => {
+    try {
+      const s = sessionStorage.getItem('turfington_recent_booked_venues');
+      return s ? JSON.parse(s) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Local mirror of user bookings from localStorage and events
+  const [localBookings, setLocalBookings] = useState([]);
+
+  useEffect(() => {
+    const syncBookings = () => {
+      const currentUserId = user?.id || user?.uid || user?.firebase_uid;
+      let combined = Array.isArray(bookings) ? [...bookings] : [];
+      try {
+        if (currentUserId) {
+          const sU = localStorage.getItem(`turfington_user_bookings_${currentUserId}`);
+          if (sU) {
+            const parsed = JSON.parse(sU);
+            if (Array.isArray(parsed)) combined = [...combined, ...parsed];
+          }
+        }
+        const s1 = localStorage.getItem('turfington_user_bookings');
+        if (s1) {
+          const parsed = JSON.parse(s1);
+          if (Array.isArray(parsed)) combined = [...combined, ...parsed];
+        }
+        const s2 = localStorage.getItem('turfington_bookings');
+        if (s2) {
+          const parsed = JSON.parse(s2);
+          if (Array.isArray(parsed)) combined = [...combined, ...parsed];
+        }
+      } catch {}
+
+      const map = new Map();
+      combined.forEach(b => {
+        if (b && b.id) map.set(String(b.id), b);
+      });
+      setLocalBookings(Array.from(map.values()));
+    };
+
+    syncBookings();
+    window.addEventListener('turfington_booking_created', syncBookings);
+    window.addEventListener('turfington_booking_updated', syncBookings);
+    return () => {
+      window.removeEventListener('turfington_booking_created', syncBookings);
+      window.removeEventListener('turfington_booking_updated', syncBookings);
+    };
+  }, [user?.id, user?.uid, user?.firebase_uid, bookings]);
+
+  const effectiveBookings = localBookings.length > 0 ? localBookings : (bookings || []);
+
+  const findTurfBooking = (turf) => {
+    if (!turf) return null;
+    const currentUserId = user?.id || user?.uid || user?.firebase_uid;
+    const turfIdStr = String(turf.id || '').trim();
+    const turfClean = String(turf.venue || turf.title || turf.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // 1. Session bookings
+    if (sessionBookedVenues) {
+      if (turfIdStr && sessionBookedVenues[turfIdStr]) return sessionBookedVenues[turfIdStr];
+      if (turfClean && sessionBookedVenues[turfClean]) return sessionBookedVenues[turfClean];
+    }
+
+    // 2. All combined bookings
+    for (const b of effectiveBookings) {
+      if (!b) continue;
+      const st = String(b.status || '').toLowerCase();
+      if (st.includes('cancel') || st.includes('reject')) continue;
+
+      const bUid = b.user_id || b.userId;
+      const isMine = !currentUserId || !bUid || bUid === 'usr_guest' || bUid === currentUserId || (user?.firebase_uid && bUid === user.firebase_uid) || (user?.id && bUid === user.id);
+      if (!isMine) continue;
+
+      const bVid = String(b.venue_id || b.turf_id || b.venueId || '').trim();
+      if (turfIdStr && bVid && turfIdStr === bVid) return b;
+
+      const bClean = String(b.venue || b.venue_name || b.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (turfClean && bClean && (turfClean === bClean || turfClean.includes(bClean) || bClean.includes(turfClean))) {
+        return b;
+      }
+    }
+    return null;
+  };
 
   // Auto-detect sport preset and auto-select date when user opens turf slot picker
   useEffect(() => {
@@ -146,6 +237,7 @@ export default function Discovery({
   };
 
   const getSlotsForTurf = (turf, dayShort) => {
+    const rawMap = turf?.slots?.[dayShort] || {};
     const times = [
       '00:00', '01:00', '02:00', '03:00', '04:00', '05:00',
       '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
@@ -313,12 +405,6 @@ export default function Discovery({
     };
   }, [user?.id, user?.role]);
 
-  // ── Player data with real GPS coords near Chennai
-  const PLAYERS_BASE = [
-    { id: 1, name: 'Amit Patel',    handle: '@amitpatel',      lat: 13.0952, lng: 80.2198, sports: ['Football', 'Cricket'],          level: 'Advanced',     matchesPlayed: 32, winRate: '71%', mutualFriends: 4, avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200', coverColor: 'from-emerald-600 to-green-800',   badge: 'Top Scorer',       badgeColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
-    { id: 2, name: 'Pooja Reddy',   handle: '@poojareddy',     lat: 13.0250, lng: 80.2150, sports: ['Badminton', 'Table Tennis'],     level: 'Intermediate', matchesPlayed: 18, winRate: '58%', mutualFriends: 7, avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200', coverColor: 'from-indigo-600 to-violet-800',   badge: 'Active Player',    badgeColor: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' },
-    { id: 3, name: 'Deepak Kumar',  handle: '@deepaktt',       lat: 13.0800, lng: 80.2100, sports: ['Table Tennis'],                  level: 'Elite',        matchesPlayed: 44, winRate: '84%', mutualFriends: 2, avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200', coverColor: 'from-rose-600 to-pink-800',       badge: 'Elite Ranked',     badgeColor: 'text-rose-400 bg-rose-500/10 border-rose-500/20' },
-  ];
 
   // ── Derived state: activities and players with real distances ──
   const [activities, setActivities] = useState([]);
@@ -501,6 +587,8 @@ export default function Discovery({
       time: `${slotDateTab}, ${slotTimeStr}`,
       price: `₹${slot.price || 600}`,
       image: selectedSlotTurf.image || selectedSlotTurf.image_url,
+      owner_id: selectedSlotTurf.owner_id || selectedSlotTurf.ownerId || 'usr_venue_owner',
+      owner_name: selectedSlotTurf.owner_name || selectedSlotTurf.ownerName || selectedSlotTurf.venue || selectedSlotTurf.title || selectedSlotTurf.name || 'Venue Owner',
       slotMeta: {
         turfId: selectedSlotTurf.id,
         dateKey: slotDateTab,
@@ -596,37 +684,113 @@ export default function Discovery({
       }
     }
 
+    const bookingId = 'bk_' + Date.now();
+    const venueTitle = activePrepaidVenue.venue || activePrepaidVenue.title || activePrepaidVenue.name || 'Sports Arena';
+    const timeStr = activePrepaidVenue.time || `${slotDateTab || 'Today'}, Flexible Slot`;
+    const dateStr = timeStr.includes(',') ? timeStr.split(',')[0].trim() : (slotDateTab || 'Today');
+    const slotHour = timeStr.includes(',') ? timeStr.split(',').slice(1).join(',').trim() : timeStr;
+    const priceStr = activePrepaidVenue.price || '₹600';
+    const imageStr = activePrepaidVenue.image || activePrepaidVenue.image_url || 'https://images.unsplash.com/photo-1538388149142-f82611d4d6c4?q=80&w=400';
+
+    const isHosted = activePrepaidVenue.slotMeta?.bookingType === 'open_match';
     const newBooking = {
-      id: 'bk_' + Date.now(),
-      title: activePrepaidVenue.venue || activePrepaidVenue.name,
+      id: bookingId,
+      venue_id: activePrepaidVenue.id || 'v_default',
+      venue: venueTitle,
+      venue_name: venueTitle,
+      title: venueTitle,
       sport: activePrepaidVenue.sport || 'Sports Activity',
-      time: activePrepaidVenue.time || 'Today, Flexible Slot',
-      price: activePrepaidVenue.price,
-      image: activePrepaidVenue.image || 'https://images.unsplash.com/photo-1538388149142-f82611d4d6c4?q=80&w=400',
+      date: dateStr,
+      time: slotHour || timeStr,
+      slot_time: timeStr,
+      price: priceStr,
+      image: imageStr,
+      status: 'PENDING OWNER APPROVAL',
       paymentType: 'Pay at Venue',
-      paymentStatus: 'Pay on Arrival'
+      payment_type: 'pay_at_venue',
+      paymentStatus: 'Pay on Arrival',
+      payment_status: 'pending_at_venue',
+      user_id: user?.id || user?.uid || user?.firebase_uid || 'usr_guest',
+      user_name: user?.full_name || user?.name || 'Player',
+      player_name: user?.full_name || user?.name || 'Player',
+      player_phone: user?.phone || '',
+      owner_id: activePrepaidVenue.owner_id || activePrepaidVenue.ownerId || 'usr_venue_owner',
+      owner_name: activePrepaidVenue.owner_name || activePrepaidVenue.ownerName || venueTitle,
+      isHosted,
+      is_hosted: isHosted,
+      capacity: activePrepaidVenue.slotMeta?.capacity || 10,
+      joinedPlayers: activePrepaidVenue.slotMeta?.myExistingCount || 1,
+      slotMeta: activePrepaidVenue.slotMeta,
+      created_at: new Date().toISOString()
     };
 
-    apiCreateBooking({
-      venue_id: activePrepaidVenue.id || 'v_default',
-      venue_name: newBooking.title,
-      sport: newBooking.sport,
-      slot_time: newBooking.time,
-      price: newBooking.price,
-      user_id: user?.id || 'usr_guest',
-      payment_type: 'pay_at_venue',
-      payment_status: 'pending_at_venue'
-    }).catch(() => {});
+    apiCreateBooking(newBooking).catch(err => console.warn('apiCreateBooking error:', err));
+
+    const turfIdStr = String(activePrepaidVenue.id || '').trim();
+    const turfClean = String(venueTitle).toLowerCase().replace(/[^a-z0-9]/g, '');
+    setSessionBookedVenues(prev => {
+      const updated = {
+        ...prev,
+        ...(turfIdStr ? { [turfIdStr]: newBooking } : {}),
+        ...(turfClean ? { [turfClean]: newBooking } : {})
+      };
+      try { sessionStorage.setItem('turfington_recent_booked_venues', JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+
+    setLocalBookings(prev => [newBooking, ...(prev || []).filter(b => b.id !== newBooking.id)]);
 
     setTimeout(() => {
       setIsPaying(false);
       setPaymentSuccess(true);
-      setBookings(prev => [newBooking, ...prev]);
+      if (setBookings) {
+        setBookings(prev => [newBooking, ...(prev || []).filter(b => b.id !== newBooking.id)]);
+      }
       setTimeout(() => {
         setActivePrepaidVenue(null);
         setPaymentSuccess(false);
-      }, 1200);
+        setBookingCelebrationData(newBooking);
+      }, 500);
     }, 600);
+  };
+
+  // Cancel booking directly from discovery turf card
+  const handleCancelUserBooking = async (booking, turf) => {
+    if (!booking && !turf) return;
+    const bId = booking?.id;
+    const vName = booking?.venue || booking?.title || turf?.venue || turf?.name || 'this turf';
+    const confirmCancel = window.confirm(`Cancel your booking for ${vName}?`);
+    if (!confirmCancel) return;
+
+    try {
+      if (bId) {
+        await apiUpdateBookingStatus(bId, 'cancelled', 'Cancelled by player');
+      }
+      if (setBookings && bId) {
+        setBookings(prev => (prev || []).map(b => b.id === bId ? { ...b, status: 'cancelled' } : b));
+      }
+      setLocalBookings(prev => prev.map(b => (b && b.id === bId) ? { ...b, status: 'cancelled' } : b));
+
+      setSessionBookedVenues(prev => {
+        const copy = { ...prev };
+        if (turf?.id) delete copy[String(turf.id).trim()];
+        const turfClean = String(vName).toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (turfClean) delete copy[turfClean];
+        try { sessionStorage.setItem('turfington_recent_booked_venues', JSON.stringify(copy)); } catch {}
+        return copy;
+      });
+
+      if (booking?.slotMeta?.slotId) {
+        apiLeaveHostedMatch(booking.slotMeta.slotId, user).catch(() => {});
+      }
+      if (bId) {
+        window.dispatchEvent(new CustomEvent('turfington_booking_updated', {
+          detail: { bookingId: bId, status: 'cancelled', rejectionReason: 'Cancelled by player' }
+        }));
+      }
+    } catch (err) {
+      console.warn('handleCancelUserBooking error:', err);
+    }
   };
 
   return (
@@ -932,10 +1096,36 @@ export default function Discovery({
 
                   return (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {nearbyList.map((turf) => (
+                      {nearbyList.map((turf) => {
+                        const currentUserId = user?.id || user?.uid || user?.firebase_uid;
+                        const turfTitle = String(turf.venue || turf.title || turf.name || '').toLowerCase().trim();
+                        const turfIdStr = String(turf.id || '').trim();
+
+                        // Find if current user has an active booking for this turf
+                        const activeBookingForTurf = findTurfBooking(turf);
+
+                        // Find if current user is hosting a match for this turf
+                        const userHostedMatch = hostedMatchesList.find(m => {
+                          if (!m) return false;
+                          const isHost = (m.host_id === currentUserId || (user?.firebase_uid && m.host_id === user.firebase_uid) || (user?.full_name && m.host_name === user.full_name));
+                          if (!isHost) return false;
+                          const mTurfId = String(m.turf_id || '').trim();
+                          const mVen = String(m.venue || '').toLowerCase().trim();
+                          return (turfIdStr && mTurfId && turfIdStr === mTurfId) || (turfTitle && mVen && (turfTitle === mVen || turfTitle.includes(mVen) || mVen.includes(turfTitle)));
+                        });
+
+                        const isBooked = !!activeBookingForTurf || !!userHostedMatch;
+                        const displaySlotTime = activeBookingForTurf?.time || activeBookingForTurf?.slot_time || userHostedMatch?.time || 'Reserved Slot';
+                        const isHosted = !!userHostedMatch || !!activeBookingForTurf?.isHosted;
+                        const joinedCount = userHostedMatch ? (userHostedMatch.players_joined || userHostedMatch.existing_players_count || 1) : (activeBookingForTurf?.joinedPlayers || 1);
+                        const totalCap = userHostedMatch ? (userHostedMatch.players_total || userHostedMatch.capacity || 10) : (activeBookingForTurf?.capacity || 10);
+
+                        return (
                         <div
                           key={turf.id}
-                          className="glass-card overflow-hidden border border-white/5 hover:border-emerald-500/30 transition-all duration-300 flex flex-col justify-between group"
+                          className={`glass-card overflow-hidden border transition-all duration-300 flex flex-col justify-between group ${
+                            isBooked ? 'border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/30' : 'border-white/5 hover:border-emerald-500/30'
+                          }`}
                         >
                           <div>
                             {/* Turf Image with Distance Badge */}
@@ -992,16 +1182,64 @@ export default function Discovery({
 
                           {/* Footer Action */}
                           <div className="p-5 pt-0">
-                            <button
-                              onClick={() => setSelectedSlotTurf(turf)}
-                              className="w-full text-xs font-extrabold uppercase tracking-widest bg-[#5842fe] hover:bg-[#4832ee] text-white py-3.5 rounded-full transition-all flex items-center justify-center space-x-2 shadow-[0_0_20px_rgba(88,66,254,0.35)] cursor-pointer hover:scale-[1.02]"
-                            >
-                              <span>Select Slot & Book</span>
-                              <ChevronRight className="w-4 h-4" />
-                            </button>
+                            {isBooked ? (
+                              <div className="space-y-2">
+                                {isHosted && (
+                                  <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl px-3 py-2 flex items-center justify-between text-xs">
+                                    <div className="flex items-center gap-1.5 text-neutral-300 font-medium">
+                                      <Users className="w-3.5 h-3.5 text-indigo-400" />
+                                      <span>Hosting Match</span>
+                                    </div>
+                                    <span className="font-extrabold text-indigo-400">
+                                      {joinedCount} / {totalCap} players joined
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Side-by-Side: Status BOOKED on the left, Button "Book More" on the right */}
+                                <div className="flex items-center gap-2">
+                                  {/* Status: BOOKED */}
+                                  <div className="flex-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 py-3 px-3 rounded-full flex items-center justify-center gap-1.5 shadow-[0_0_12px_rgba(16,185,129,0.15)] select-none">
+                                    <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                                    <span className="text-xs font-black uppercase tracking-wider">BOOKED</span>
+                                  </div>
+
+                                  {/* Button on the side: Book More */}
+                                  <button
+                                    onClick={() => setSelectedSlotTurf(turf)}
+                                    className="flex-1 text-xs font-black uppercase tracking-wider bg-[#5842fe] hover:bg-[#4832ee] text-white py-3 px-3 rounded-full transition-all flex items-center justify-center space-x-1.5 shadow-[0_0_15px_rgba(88,66,254,0.35)] cursor-pointer hover:scale-[1.02]"
+                                  >
+                                    <Clock className="w-3.5 h-3.5" />
+                                    <span>Book More</span>
+                                  </button>
+                                </div>
+
+                                {/* Slot details & Cancel option */}
+                                <div className="flex justify-between items-center px-1 text-[11px] pt-0.5">
+                                  <span className="text-neutral-400 truncate max-w-[170px]" title={displaySlotTime}>
+                                    {displaySlotTime}
+                                  </span>
+                                  <button
+                                    onClick={() => handleCancelUserBooking(activeBookingForTurf || { id: userHostedMatch?.id, venue: turf.venue || turf.title || turf.name }, turf)}
+                                    className="text-neutral-400 hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer font-semibold flex-shrink-0"
+                                  >
+                                    <XCircle className="w-3 h-3 text-rose-400" />
+                                    <span>Cancel</span>
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setSelectedSlotTurf(turf)}
+                                className="w-full text-xs font-extrabold uppercase tracking-widest bg-[#5842fe] hover:bg-[#4832ee] text-white py-3.5 rounded-full transition-all flex items-center justify-center space-x-2 shadow-[0_0_20px_rgba(88,66,254,0.35)] cursor-pointer hover:scale-[1.02]"
+                              >
+                                <span>Select Slot & Book</span>
+                                <ChevronRight className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </div>
-                      ))}
+                      )})}
                     </div>
                   );
                 })()}
@@ -1020,7 +1258,7 @@ export default function Discovery({
                       </h2>
                     </div>
                     <p className="text-xs text-neutral-400 mt-0.5">
-                      Showing players within <span className="text-indigo-400 font-bold">{radiusKm} km</span> radius from Firebase Database
+                      Showing all registered players ({dbPlayersList.length} athletes)
                     </p>
                   </div>
 
@@ -1045,20 +1283,21 @@ export default function Discovery({
                 {playersLoading ? (
                   <div className="glass-card p-12 text-center border border-white/5 flex items-center justify-center space-x-3 text-indigo-400">
                     <Loader2 className="w-6 h-6 animate-spin" />
-                    <span className="text-sm font-bold">Searching Firebase for players near you...</span>
+                    <span className="text-sm font-bold">Searching for registered players...</span>
                   </div>
                 ) : dbPlayersList.length === 0 ? (
                   <div className="glass-card p-12 text-center border border-dashed border-white/10 space-y-3">
                     <Users className="w-10 h-10 text-neutral-600 mx-auto" />
-                    <h3 className="text-white font-bold text-base">No Players Found</h3>
+                    <h3 className="text-white font-bold text-base">No users found</h3>
                     <p className="text-neutral-500 text-xs max-w-md mx-auto">
-                      No matching registered player profiles found in this area. Try increasing your distance radius filter or clearing search query.
+                      No matching registered player profiles found. Try searching by their Player ID (e.g. @handle) or name.
                     </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {dbPlayersList.map((player) => {
                       const isFollowing = followedPlayers.includes(player.id);
+                      const displayPlayerId = player.player_id || player.handle || (player.username ? (player.username.startsWith('@') ? player.username : `@${player.username}`) : `@athlete_${String(player.id).slice(-4)}`);
                       return (
                         <div
                           key={player.id}
@@ -1068,16 +1307,16 @@ export default function Discovery({
                           <div className="space-y-4">
                             <div className="flex items-center space-x-3.5">
                               <img
-                                src={player.avatar_url || player.avatar || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200'}
-                                alt={player.full_name}
+                                src={player.avatar_url || player.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${player.id}`}
+                                alt={player.full_name || player.name}
                                 className="w-13 h-13 rounded-full object-cover border-2 border-indigo-500/30 group-hover:border-indigo-400 transition-colors"
                               />
                               <div className="text-left overflow-hidden">
                                 <h3 className="font-bold text-white text-base truncate group-hover:text-indigo-400 transition-colors">
-                                  {player.full_name || 'Sports Player'}
+                                  {player.full_name || player.name || 'Sports Player'}
                                 </h3>
-                                <p className="text-xs text-indigo-300 font-mono">
-                                  @{player.username || 'player'}
+                                <p className="text-xs text-indigo-300 font-mono font-bold truncate">
+                                  {displayPlayerId}
                                 </p>
                                 <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border mt-1 inline-block ${
                                   player.role === 'owner' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
@@ -1090,26 +1329,46 @@ export default function Discovery({
                             <div className="flex items-center justify-between text-xs pt-3 border-t border-white/5 text-neutral-400">
                               <span className="flex items-center gap-1 text-emerald-400 font-extrabold">
                                 <MapPin className="w-3.5 h-3.5" />
-                                {player.distanceText || '1.2 km away'}
+                                {player.distanceText || 'Nearby'}
                               </span>
-                              <span>{player.city || 'Chennai'}</span>
+                              <span>{player.city || player.location || 'Chennai'}</span>
                             </div>
                           </div>
 
-                          <div className="mt-4 pt-3 flex space-x-2">
+                          <div className="mt-4 pt-3 flex items-center space-x-2">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleFollow(player.id);
                               }}
-                              className={`w-full py-2 text-xs font-bold rounded-xl border transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                              className={`flex-1 py-2 text-xs font-bold rounded-xl border transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
                                 isFollowing
-                                  ? 'bg-white/10 text-white border-white/20'
+                                  ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30'
                                   : 'bg-indigo-600 hover:bg-indigo-500 text-white border-transparent'
                               }`}
                             >
                               {isFollowing ? <UserCheck className="w-3.5 h-3.5 text-emerald-400" /> : <UserPlus className="w-3.5 h-3.5" />}
-                              <span>{isFollowing ? 'Following' : 'Follow Player'}</span>
+                              <span>{isFollowing ? 'Friends' : 'Add Friend+'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onStartChat) {
+                                  onStartChat(player);
+                                } else if (setTab) {
+                                  try {
+                                    localStorage.setItem('turfington_target_chat_user', JSON.stringify(player));
+                                  } catch {}
+                                  setTab('community');
+                                }
+                              }}
+                              className="px-3.5 py-2 text-xs font-bold rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/10 transition-all flex items-center justify-center space-x-1 cursor-pointer"
+                              title="Message & Chat"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5 text-indigo-400" />
+                              <span>Message</span>
                             </button>
                           </div>
                         </div>
@@ -1371,26 +1630,57 @@ export default function Discovery({
                            <div className="text-[10px] text-center text-neutral-500 font-semibold border border-white/5 rounded-xl py-2 bg-white/[0.01]">
                              View Only Mode
                            </div>
-                         ) : (
-                           <div className="flex space-x-2">
-                             <button 
-                               onClick={() => setSelectedSlotTurf(v)}
-                               className="flex-grow text-xs font-bold bg-white text-black py-2.5 rounded-full hover:bg-neutral-200 transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
-                             >
-                               <Clock className="w-3.5 h-3.5 text-black" />
-                               <span>Select Slot & Book</span>
-                             </button>
-
-                             {(bookingOffers.length > 0 || membershipPackages.length > 0) && (
+                         ) : (() => {
+                           const activeB = findTurfBooking(v);
+                           return activeB ? (
+                             <div className="space-y-2">
+                               <div className="flex items-center gap-2">
+                                 <div className="flex-1 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 py-2.5 px-3 rounded-full flex items-center justify-center gap-1.5 shadow-sm text-xs font-black uppercase tracking-wider select-none">
+                                   <CheckCircle className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                                   <span>BOOKED</span>
+                                 </div>
+                                 <button
+                                   onClick={() => setSelectedSlotTurf(v)}
+                                   className="flex-1 text-xs font-black uppercase tracking-wider bg-[#5842fe] hover:bg-[#4832ee] text-white py-2.5 px-3 rounded-full transition-all flex items-center justify-center space-x-1 cursor-pointer shadow-[0_0_15px_rgba(88,66,254,0.35)] hover:scale-[1.02]"
+                                 >
+                                   <Clock className="w-3.5 h-3.5" />
+                                   <span>Book More</span>
+                                 </button>
+                               </div>
+                               <div className="flex justify-between items-center px-1 text-[11px] pt-0.5">
+                                 <span className="text-neutral-400 truncate max-w-[170px]">
+                                   {activeB.time || activeB.slot_time || 'Reserved'}
+                                 </span>
+                                 <button
+                                   onClick={() => handleCancelUserBooking(activeB, v)}
+                                   className="text-neutral-400 hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer font-semibold flex-shrink-0"
+                                 >
+                                   <XCircle className="w-3 h-3 text-rose-400" />
+                                   <span>Cancel</span>
+                                 </button>
+                               </div>
+                             </div>
+                           ) : (
+                             <div className="flex space-x-2">
                                <button 
-                                 onClick={() => setSelectedDealsVenue(v)}
-                                 className="px-3.5 py-2.5 text-xs font-bold bg-white/5 hover:bg-white/10 text-white border border-white/10 rounded-full flex items-center justify-center space-x-1.5 transition-all"
+                                 onClick={() => setSelectedSlotTurf(v)}
+                                 className="flex-grow text-xs font-bold bg-white text-black py-2.5 rounded-full hover:bg-neutral-200 transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
                                >
-                                 <span>Deals</span>
+                                 <Clock className="w-3.5 h-3.5 text-black" />
+                                 <span>Select Slot & Book</span>
                                </button>
-                             )}
-                           </div>
-                         )}
+
+                               {(bookingOffers.length > 0 || membershipPackages.length > 0) && (
+                                 <button 
+                                   onClick={() => setSelectedDealsVenue(v)}
+                                   className="px-3.5 py-2.5 text-xs font-bold bg-white/5 hover:bg-white/10 text-white border border-white/10 rounded-full flex items-center justify-center space-x-1.5 transition-all"
+                                 >
+                                   <span>Deals</span>
+                                 </button>
+                               )}
+                             </div>
+                           );
+                         })()}
                       </div>
                     </div>
                   );
@@ -2185,13 +2475,20 @@ export default function Discovery({
                 <div className="mt-6 pt-4 border-t border-white/10 flex space-x-3">
                   <button
                     onClick={() => {
-                      alert(`Message thread started with @${selectedPlayerModal.username || 'player'}!`);
+                      if (onStartChat) {
+                        onStartChat(selectedPlayerModal);
+                      } else if (setTab) {
+                        try {
+                          localStorage.setItem('turfington_target_chat_user', JSON.stringify(selectedPlayerModal));
+                        } catch {}
+                        setTab('community');
+                      }
                       setSelectedPlayerModal(null);
                     }}
                     className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold rounded-xl transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-lg shadow-indigo-600/30"
                   >
-                    <MessageSquare className="w-4 h-4" />
-                    <span>Chat / Challenge</span>
+                    <MessageSquare className="w-4 h-4 text-emerald-300" />
+                    <span>Message</span>
                   </button>
 
                   <button
@@ -2200,24 +2497,163 @@ export default function Discovery({
                     }}
                     className={`py-2.5 px-5 text-xs font-bold rounded-xl border transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
                       followedPlayers.includes(selectedPlayerModal.id)
-                        ? 'bg-white/10 text-white border-white/20'
+                        ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30'
                         : 'bg-white text-black border-transparent hover:bg-neutral-200'
                     }`}
                   >
                     {followedPlayers.includes(selectedPlayerModal.id) ? (
                       <>
                         <UserCheck className="w-4 h-4 text-emerald-400" />
-                        <span>Following</span>
+                        <span>Friends</span>
                       </>
                     ) : (
                       <>
                         <UserPlus className="w-4 h-4" />
-                        <span>Follow</span>
+                        <span>Add Friend+</span>
                       </>
                     )}
                   </button>
                 </div>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* BOOKING DONE CELEBRATION MODAL */}
+      <AnimatePresence>
+        {bookingCelebrationData && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.85 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setBookingCelebrationData(null)}
+              className="absolute inset-0 bg-black backdrop-blur-md"
+            />
+
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.85, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: "spring", stiffness: 350, damping: 25 }}
+              className="relative glass-card w-full max-w-md p-6 sm:p-7 border border-emerald-500/30 shadow-[0_0_50px_rgba(16,185,129,0.2)] text-center z-10 rounded-3xl overflow-hidden"
+            >
+              {/* Glowing decorative background circle */}
+              <div className="absolute -top-24 -left-24 w-48 h-48 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+
+              {/* Animated Success Icon */}
+              <div className="relative mx-auto w-20 h-20 mb-4 flex items-center justify-center">
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: [0, 1.2, 1] }}
+                  transition={{ duration: 0.5, ease: "easeOut" }}
+                  className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 flex items-center justify-center"
+                >
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ delay: 0.2, type: "spring", stiffness: 400 }}
+                    className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center shadow-[0_0_25px_rgba(16,185,129,0.5)]"
+                  >
+                    <Check className="w-8 h-8 text-black stroke-[3]" />
+                  </motion.div>
+                </motion.div>
+                <motion.span
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: -20, x: -30 }}
+                  transition={{ delay: 0.3, duration: 0.6 }}
+                  className="absolute text-lg"
+                >
+                  ✨
+                </motion.span>
+                <motion.span
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: -25, x: 30 }}
+                  transition={{ delay: 0.35, duration: 0.6 }}
+                  className="absolute text-lg"
+                >
+                  🎉
+                </motion.span>
+              </div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.25 }}
+              >
+                <h3 className="font-display font-black text-2xl text-white tracking-tight">
+                  Booking Confirmed!
+                </h3>
+                <p className="text-xs text-emerald-400 font-semibold mt-1">
+                  Your turf slot has been successfully reserved
+                </p>
+              </motion.div>
+
+              {/* Booking Summary Box */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.35 }}
+                className="mt-5 p-4 rounded-2xl bg-white/[0.04] border border-white/10 text-left space-y-2.5 text-xs"
+              >
+                <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                  <span className="text-neutral-400">Turf Venue</span>
+                  <span className="font-bold text-white text-sm truncate max-w-[200px]">
+                    {bookingCelebrationData.venue || bookingCelebrationData.venue_name}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-400">Sport</span>
+                  <span className="text-neutral-200 font-medium flex items-center gap-1.5">
+                    <SportIcon sport={bookingCelebrationData.sport} size={14} className="text-emerald-400" />
+                    <span>{bookingCelebrationData.sport}</span>
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-400">Reserved Slot</span>
+                  <span className="text-indigo-400 font-bold">
+                    {bookingCelebrationData.time || bookingCelebrationData.slot_time}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                  <span className="text-neutral-400">Payment Term</span>
+                  <span className="font-extrabold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 text-[11px]">
+                    Pay on Arrival ({bookingCelebrationData.price})
+                  </span>
+                </div>
+
+                {bookingCelebrationData.isHosted && (
+                  <div className="mt-2 p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-[11px] text-indigo-300">
+                    👥 <strong>Match Open to Players:</strong> Other players can now discover and join your match in the Community feed!
+                  </div>
+                )}
+              </motion.div>
+
+              {/* Action Buttons */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.45 }}
+                className="mt-6 flex flex-col sm:flex-row gap-2.5"
+              >
+                <button
+                  onClick={() => {
+                    setBookingCelebrationData(null);
+                    if (setTab) setTab('dashboard');
+                  }}
+                  className="flex-1 py-3 bg-[#5842fe] hover:bg-[#4832ee] text-white font-extrabold text-xs uppercase tracking-wider rounded-full shadow-[0_0_20px_rgba(88,66,254,0.35)] transition-all cursor-pointer"
+                >
+                  View in My Bookings
+                </button>
+                <button
+                  onClick={() => setBookingCelebrationData(null)}
+                  className="flex-1 py-3 bg-white/10 hover:bg-white/15 text-white font-bold text-xs uppercase tracking-wider rounded-full border border-white/10 transition-all cursor-pointer"
+                >
+                  Done
+                </button>
+              </motion.div>
             </motion.div>
           </div>
         )}

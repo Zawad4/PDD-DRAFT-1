@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, Users, Clock, Award, Star, Calendar, MessageSquare, Heart, Share2, Compass, Plus, Flame } from 'lucide-react';
-import { apiCreateDirectChat, apiSubscribeVenues, apiFetchHostedMatches, apiJoinHostedMatch, apiLeaveHostedMatch } from '../services/db';
+import { apiCreateDirectChat, apiSubscribeVenues, apiFetchHostedMatches, apiJoinHostedMatch, apiLeaveHostedMatch, apiCreateBooking } from '../services/db';
 
 export default function Home({ 
   setTab, 
@@ -255,16 +255,43 @@ export default function Home({
   };
 
   const handleBookVenue = (venue) => {
+    const bookingId = 'bk_' + Date.now();
+    const venueName = venue.name || venue.title || 'Sports Arena';
+    const sportName = Array.isArray(venue.sports) && venue.sports.length > 0 ? venue.sports[0] : (venue.sport || 'Football');
+    const priceVal = venue.price || '₹1,200';
+    const imageVal = venue.image || venue.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=400';
+
     const newBooking = {
-      id: Date.now(),
-      title: venue.name,
-      sport: venue.sports[0],
+      id: bookingId,
+      venue_id: venue.id || 'v_default',
+      title: venueName,
+      venue: venueName,
+      venue_name: venueName,
+      sport: sportName,
       time: 'Tomorrow, 5:00 PM',
-      price: venue.price,
-      image: venue.image
+      slot_time: 'Tomorrow, 5:00 PM',
+      date: 'Tomorrow',
+      price: priceVal,
+      image: imageVal,
+      status: 'PENDING OWNER APPROVAL',
+      paymentType: 'Pay at Venue',
+      payment_type: 'pay_at_venue',
+      paymentStatus: 'Pay on Arrival',
+      payment_status: 'pending_at_venue',
+      user_id: user?.id || user?.uid || user?.firebase_uid || 'usr_guest',
+      user_name: user?.full_name || user?.name || 'Player',
+      player_name: user?.full_name || user?.name || 'Player',
+      player_phone: user?.phone || '',
+      owner_id: venue.owner_id || venue.ownerId || 'usr_venue_owner',
+      owner_name: venue.owner_name || venue.ownerName || venueName,
+      created_at: new Date().toISOString()
     };
-    setBookings([newBooking, ...bookings]);
-    alert(`Successfully booked slots at ${venue.name}!`);
+
+    apiCreateBooking(newBooking).catch(() => {});
+    if (setBookings) {
+      setBookings(prev => [newBooking, ...(prev || [])]);
+    }
+    alert(`Successfully booked slots at ${venueName}! View it anytime under 'Your Bookings'.`);
   };
 
   // Helper to color-code sports accents

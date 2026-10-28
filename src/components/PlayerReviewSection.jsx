@@ -31,6 +31,17 @@ const ENDORSEMENT_BADGES = [
   { id: 'Natural Leader', label: 'Natural Leader', icon: '👑', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' }
 ];
 
+const OWNER_ENDORSEMENT_BADGES = [
+  { id: 'Very Humble Person', label: 'Very Humble Person', icon: '🙏', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Turf in Good Shape', label: 'Maintained Turf in Good Shape', icon: '✨', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Prompt Communication', label: 'Prompt Communication', icon: '⚡', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Clean Amenities', label: 'Clean Changing & Washrooms', icon: '🚿', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Top Quality Floodlights', label: 'Top-Quality Floodlights', icon: '💡', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Fair Pricing', label: 'Fair Rules & No Hidden Fees', icon: '🛡️', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Accommodating Host', label: 'Flexible & Accommodating Host', icon: '🤝', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' },
+  { id: 'Premium Equipment', label: 'Great Nets & Gear Provided', icon: '🎾', color: 'bg-white/[0.03] text-neutral-300 border-white/10 hover:border-white/25' }
+];
+
 const SPORT_OPTIONS = ['Football', 'Cricket', 'Badminton', 'Pickleball', 'Tennis', 'Basketball', 'Table Tennis'];
 
 const PERFORMANCE_LABELS = {
@@ -47,6 +58,22 @@ const BEHAVIOUR_LABELS = {
   3: 'Neutral / Fair',
   4: 'Very Respectful & Friendly',
   5: 'Exemplary Sportsmanship & Fair Play'
+};
+
+const OWNER_MAINTENANCE_LABELS = {
+  1: 'Poor Court Condition / Needs Work',
+  2: 'Fair Condition / Minor Wear',
+  3: 'Decent & Playable Shape',
+  4: 'Well-Maintained Turf & Clean Facility',
+  5: 'Pristine, Elite Quality Turf Maintenance'
+};
+
+const OWNER_HOSPITALITY_LABELS = {
+  1: 'Unfriendly / Hard to Reach',
+  2: 'Strict / Inflexible',
+  3: 'Polite & Standard Host',
+  4: 'Very Humble, Polite & Helpful',
+  5: 'Exceptionally Humble & Super Welcoming'
 };
 
 export default function PlayerReviewSection({ targetPlayer, currentUser }) {
@@ -104,8 +131,15 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
   }, [currentUserId]);
 
   // Fetch reviews for selected player
-  const activePlayerId = selectedPlayer?.id || selectedPlayer?.firebase_uid || selectedPlayer?.email || 'usr_rahul';
-  const activePlayerName = selectedPlayer?.full_name || selectedPlayer?.name || 'Rahul Sharma';
+  const activePlayerId = selectedPlayer?.id || selectedPlayer?.firebase_uid || selectedPlayer?.email || currentUserId;
+  const activePlayerName = selectedPlayer?.full_name || selectedPlayer?.name || currentUserName;
+  const isTargetOwner = (selectedPlayer?.role || '').toLowerCase() === 'owner' || !!selectedPlayer?.is_owner || !!selectedPlayer?.venue_owner;
+
+  const currentBadges = isTargetOwner ? OWNER_ENDORSEMENT_BADGES : ENDORSEMENT_BADGES;
+  const currentDim1Label = isTargetOwner ? 'Turf Maintenance & Court Quality' : 'Match Performance & Skill';
+  const currentDim2Label = isTargetOwner ? 'Host Humility & Hospitality' : 'Sportsmanship & Behaviour';
+  const currentDim1Map = isTargetOwner ? OWNER_MAINTENANCE_LABELS : PERFORMANCE_LABELS;
+  const currentDim2Map = isTargetOwner ? OWNER_HOSPITALITY_LABELS : BEHAVIOUR_LABELS;
 
   const loadReviews = async () => {
     setLoading(true);
@@ -227,16 +261,18 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
         <div>
           <div className="flex items-center space-x-2 text-neutral-400 text-[10px] font-mono uppercase tracking-widest mb-1.5">
             <Award className="w-3.5 h-3.5 text-neutral-400" />
-            <span>Peer Reputation & Verified Feedback</span>
+            <span>{isTargetOwner ? 'Venue Owner Reputation & Verified Feedback' : 'Peer Reputation & Verified Feedback'}</span>
           </div>
           <h2 className="font-display font-bold text-xl text-white tracking-tight flex items-center gap-2.5">
-            <span>Peer Reviews & Endorsements</span>
+            <span>{isTargetOwner ? 'Owner Hospitality & Turf Condition' : 'Peer Reviews & Endorsements'}</span>
             <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-white/5 text-neutral-300 border border-white/10">
               {reviewsData.totalReviews} Reviews
             </span>
           </h2>
           <p className="text-xs text-neutral-400 font-light mt-1">
-            Real peer athlete assessments on match performance, clutch skill, fair play, and on-court behavior.
+            {isTargetOwner 
+              ? 'Verified player ratings on owner humility, turf condition, clean amenities, and helpful booking support.'
+              : 'Real peer athlete assessments on match performance, clutch skill, fair play, and on-court behavior.'}
           </p>
         </div>
 
@@ -270,7 +306,7 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
             className="px-5 py-2.5 rounded-full bg-white text-black hover:bg-neutral-200 font-bold text-xs uppercase tracking-wider flex items-center space-x-2 shadow-md transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>Write Peer Review</span>
+            <span>{isTargetOwner ? 'Review Venue Owner' : 'Write Peer Review'}</span>
           </button>
         </div>
       </div>
@@ -282,11 +318,11 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
         const overallStyle = getRatingColor(reviewsData.overallScore);
         return (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {/* Card 1: Performance Rating */}
+            {/* Card 1: Performance Rating / Turf Quality */}
             <div className={`glass-card p-6 border ${perfStyle.borderLight} bg-neutral-900/70 hover:border-white/15 rounded-3xl space-y-3 relative overflow-hidden transition-colors`}>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
-                  <Flame className="w-3.5 h-3.5 text-neutral-400" /> Match Performance
+                  <Flame className="w-3.5 h-3.5 text-neutral-400" /> {isTargetOwner ? 'Turf Quality & Maintenance' : 'Match Performance'}
                 </span>
                 <div className={`flex items-center space-x-1 ${perfStyle.text}`}>
                   <Star className={`w-3.5 h-3.5 ${perfStyle.starFill}`} />
@@ -307,15 +343,17 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                 />
               </div>
               <p className="text-[11px] text-neutral-400 font-light">
-                Reflects clutch performance, stamina, tactical vision, and game-changing plays in verified matches.
+                {isTargetOwner 
+                  ? 'Reflects turf surface condition, proper bounce, clean amenities, and overall court upkeep.'
+                  : 'Reflects clutch performance, stamina, tactical vision, and game-changing plays in verified matches.'}
               </p>
             </div>
 
-            {/* Card 2: Behaviour & Sportsmanship */}
+            {/* Card 2: Behaviour & Sportsmanship / Host Humility */}
             <div className={`glass-card p-6 border ${behStyle.borderLight} bg-neutral-900/70 hover:border-white/15 rounded-3xl space-y-3 relative overflow-hidden transition-colors`}>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-neutral-400" /> Sportsmanship & Behaviour
+                  <ShieldCheck className="w-3.5 h-3.5 text-neutral-400" /> {isTargetOwner ? 'Host Humility & Hospitality' : 'Sportsmanship & Behaviour'}
                 </span>
                 <div className={`flex items-center space-x-1 ${behStyle.text}`}>
                   <Star className={`w-3.5 h-3.5 ${behStyle.starFill}`} />
@@ -336,7 +374,9 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                 />
               </div>
               <p className="text-[11px] text-neutral-400 font-light">
-                Reflects fair play, respect for referee & opponents, calm temperament under pressure, and zero toxicity.
+                {isTargetOwner
+                  ? 'Reflects host humility, polite communication, prompt support, and respectful booking handling.'
+                  : 'Reflects fair play, respect for referee & opponents, calm temperament under pressure, and zero toxicity.'}
               </p>
             </div>
 
@@ -386,13 +426,8 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
           <span>Top Peer Endorsements for {activePlayerName}</span>
         </h4>
         <div className="flex flex-wrap gap-2.5">
-          {ENDORSEMENT_BADGES.map(badge => {
-            const count = reviewsData.badgeCounts?.[badge.id] || (
-              badge.id === 'Fair Play Champion' ? 14 :
-              badge.id === 'Clutch Player' ? 11 :
-              badge.id === 'Always On Time' ? 9 :
-              badge.id === 'Team Motivator' ? 8 : 4
-            );
+          {currentBadges.map(badge => {
+            const count = reviewsData.badgeCounts?.[badge.id] || 0;
             return (
               <div
                 key={badge.id}
@@ -436,7 +471,7 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
           </div>
 
           <span className="text-[11px] text-neutral-500">
-            Showing {filteredReviews.length} athlete reviews
+            Showing {filteredReviews.length} {isTargetOwner ? 'venue hospitality' : 'athlete'} reviews
           </span>
         </div>
 
@@ -452,9 +487,13 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
               <MessageSquare className="w-6 h-6" />
             </div>
             <div>
-              <h4 className="font-display font-bold text-white text-base">No reviews yet for this athlete</h4>
+              <h4 className="font-display font-bold text-white text-base">
+                {isTargetOwner ? 'No reviews yet for this venue owner' : 'No reviews yet for this athlete'}
+              </h4>
               <p className="text-xs text-neutral-400 max-w-sm mx-auto mt-1">
-                Be the first teammate or opponent to review {activePlayerName}'s match performance and on-court behaviour!
+                {isTargetOwner 
+                  ? `Be the first player to review ${activePlayerName}'s turf maintenance and host hospitality!`
+                  : `Be the first teammate or opponent to review ${activePlayerName}'s match performance and on-court behaviour!`}
               </p>
             </div>
             <button
@@ -462,7 +501,7 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
               className="px-5 py-2.5 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider transition-all inline-flex items-center space-x-1.5 shadow-lg shadow-indigo-600/30 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Leave First Peer Review</span>
+              <span>{isTargetOwner ? 'Leave First Owner Review' : 'Leave First Peer Review'}</span>
             </button>
           </div>
         ) : (
@@ -525,7 +564,7 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                   {rev.badges && rev.badges.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {rev.badges.map((bName) => {
-                        const bObj = ENDORSEMENT_BADGES.find(x => x.id === bName);
+                        const bObj = [...ENDORSEMENT_BADGES, ...OWNER_ENDORSEMENT_BADGES].find(x => x.id === bName);
                         return (
                           <span
                             key={bName}
@@ -595,7 +634,9 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                     <Award className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="font-display font-bold text-white text-lg tracking-tight">Write Peer Athlete Review</h3>
+                    <h3 className="font-display font-bold text-white text-lg tracking-tight">
+                      {isTargetOwner ? 'Review Venue Owner & Turf Shape' : 'Write Peer Athlete Review'}
+                    </h3>
                     <p className="text-xs text-neutral-400 mt-0.5">
                       Reviewing <span className="font-semibold text-white">{activePlayerName}</span>
                     </p>
@@ -610,11 +651,11 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
               </div>
 
               <form onSubmit={handleSubmitReview} className="space-y-6">
-                {/* 1. Performance Rating (1 - 5 Stars) */}
+                {/* 1. Performance / Turf Maintenance Rating (1 - 5 Stars) */}
                 <div className="space-y-2 p-4 rounded-2xl bg-white/[0.02] border border-white/10">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-semibold uppercase tracking-wider text-neutral-300 flex items-center gap-1.5">
-                      <Star className="w-3.5 h-3.5 text-neutral-300" /> Match Performance & Skill
+                      <Star className="w-3.5 h-3.5 text-neutral-300" /> {currentDim1Label}
                     </label>
                     <span className={`text-xs font-semibold ${getRatingColor(perfHover || perfRating).text}`}>
                       {perfHover || perfRating} / 5 Stars
@@ -645,15 +686,15 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                     })}
                   </div>
                   <p className="text-[11px] text-neutral-400 font-light">
-                    Level: <span className={`font-semibold ${getRatingColor(perfHover || perfRating).text}`}>{PERFORMANCE_LABELS[perfHover || perfRating]}</span>
+                    Level: <span className={`font-semibold ${getRatingColor(perfHover || perfRating).text}`}>{currentDim1Map[perfHover || perfRating]}</span>
                   </p>
                 </div>
 
-                {/* 2. Behaviour & Sportsmanship Rating (1 - 5 Stars) */}
+                {/* 2. Behaviour & Sportsmanship / Host Humility Rating (1 - 5 Stars) */}
                 <div className="space-y-2 p-4 rounded-2xl bg-white/[0.02] border border-white/10">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-semibold uppercase tracking-wider text-neutral-300 flex items-center gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-neutral-300" /> Behaviour & Sportsmanship
+                      <ShieldCheck className="w-3.5 h-3.5 text-neutral-300" /> {currentDim2Label}
                     </label>
                     <span className={`text-xs font-semibold ${getRatingColor(behHover || behRating).text}`}>
                       {behHover || behRating} / 5 Stars
@@ -684,7 +725,7 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                     })}
                   </div>
                   <p className="text-[11px] text-neutral-400 font-light">
-                    Level: <span className={`font-semibold ${getRatingColor(behHover || behRating).text}`}>{BEHAVIOUR_LABELS[behHover || behRating]}</span>
+                    Level: <span className={`font-semibold ${getRatingColor(behHover || behRating).text}`}>{currentDim2Map[behHover || behRating]}</span>
                   </p>
                 </div>
 
@@ -707,13 +748,13 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
 
                   <div className="space-y-1.5">
                     <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">
-                      Match / Tournament Context
+                      {isTargetOwner ? 'Venue & Slot Context' : 'Match / Tournament Context'}
                     </label>
                     <input
                       type="text"
                       value={matchContext}
                       onChange={(e) => setMatchContext(e.target.value)}
-                      placeholder="e.g. Indiranagar 7v7 Champions Trophy"
+                      placeholder={isTargetOwner ? "e.g. TLK Sports Academy - Badminton Court 2" : "e.g. Indiranagar 7v7 Champions Trophy"}
                       className="w-full bg-[#16161a] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -722,11 +763,11 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                 {/* 4. Endorsement Badges Selector */}
                 <div className="space-y-2">
                   <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold flex items-center justify-between">
-                    <span>Select Endorsement Badges (Click to toggle)</span>
+                    <span>{isTargetOwner ? 'Endorse Host & Venue Highlights' : 'Select Endorsement Badges (Click to toggle)'}</span>
                     <span className="text-indigo-400 font-normal">{selectedBadges.length} selected</span>
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    {ENDORSEMENT_BADGES.map(badge => {
+                    {currentBadges.map(badge => {
                       const isSelected = selectedBadges.includes(badge.id);
                       return (
                         <button
@@ -757,13 +798,17 @@ export default function PlayerReviewSection({ targetPlayer, currentUser }) {
                 {/* 5. Written Review Comment */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">
-                    Written Feedback on Performance & Behaviour <span className="text-rose-400">*</span>
+                    {isTargetOwner ? 'Written Feedback on Host & Turf Quality' : 'Written Feedback on Performance & Behaviour'} <span className="text-rose-400">*</span>
                   </label>
                   <textarea
                     rows={4}
                     value={reviewComment}
                     onChange={(e) => setReviewComment(e.target.value)}
-                    placeholder={`Describe ${activePlayerName}'s game performance, tactical awareness, punctuality, and composure with teammates and opponents...`}
+                    placeholder={
+                      isTargetOwner
+                        ? "How was the host's hospitality and turf condition? (e.g. Very humble person, maintained the turf in good shape, quick to resolve queries...)"
+                        : `Describe ${activePlayerName}'s game performance, tactical awareness, punctuality, and composure with teammates and opponents...`
+                    }
                     required
                     className="w-full bg-[#16161a] border border-white/10 rounded-2xl p-4 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-indigo-500/80 resize-none leading-relaxed"
                   />

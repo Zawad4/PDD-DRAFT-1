@@ -4,7 +4,7 @@ import {
   Users, MessageSquare, Plus, Search, Shield, Flame, Trophy,
   Zap, Star, Bell, BellRing, Check, CheckCheck, X, ChevronRight,
   Filter, Sparkles, Compass, MapPin, Activity, ArrowLeft,
-  UserPlus, Radio, Circle, Pin, VolumeX, Volume2, Lock, ShieldCheck
+  UserPlus, UserCheck, Radio, Circle, Pin, VolumeX, Volume2, Lock, ShieldCheck
 } from 'lucide-react';
 import SportIcon from '../components/SportIcon';
 import ChatWindowEnhanced from '../components/ChatWindowEnhanced';
@@ -14,6 +14,7 @@ import {
   joinCommunityGroup,
   leaveCommunityGroup,
   getOrCreateDirectConversation,
+  getDirectConversationId,
   createCommunityGroup,
   togglePinConversation,
   toggleMuteConversation,
@@ -21,13 +22,82 @@ import {
   ensureDefaultCommunityData,
   markConversationAsRead
 } from '../services/chatService';
-import { apiFetchAthletes } from '../services/db';
+import { apiFetchAthletes, apiSearchUsers, apiFollowUser, NPC_TEST_USER_IDS } from '../services/db';
 import { auth, setupPushNotifications } from '../services/firebase';
 
 const SPORT_CATEGORIES = ['All', 'Football', 'Cricket', 'Badminton', 'Pickleball', 'Table Tennis', 'Bowling'];
 
+export function getGroupImage(group) {
+  if (!group) return '/bowling_group.jpg';
+  const name = String(group.name || group.title || group.groupName || '').toLowerCase();
+  const sport = String(group.sportCategory || group.sport || '').toLowerCase();
+  const gid = String(group.groupId || group.id || '').toLowerCase();
+  
+  // Bowling group photo uploaded by user: strictly use /bowling_group.jpg
+  if (sport.includes('bowling') || gid.includes('bowling') || name.includes('bowling')) {
+    return '/bowling_group.jpg';
+  }
+  if (group.imageUrl) {
+    if (group.imageUrl.includes('bowling')) return '/bowling_group.jpg';
+    return group.imageUrl;
+  }
+  if (sport.includes('badminton') || gid.includes('badminton') || name.includes('badminton') || name.includes('smasher')) {
+    return 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=600';
+  }
+  if (sport.includes('cricket') || gid.includes('cricket') || name.includes('cricket')) {
+    return 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?q=80&w=600';
+  }
+  if (sport.includes('pickleball') || sport.includes('padel') || gid.includes('pickleball') || gid.includes('padel') || name.includes('padel')) {
+    return 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?q=80&w=600';
+  }
+  if (sport.includes('tennis') || gid.includes('tennis') || name.includes('tennis')) {
+    return 'https://images.unsplash.com/photo-1595435934249-5df7ed86e1c0?q=80&w=600';
+  }
+  if (sport.includes('football') || gid.includes('football') || name.includes('football') || name.includes('turf hub')) {
+    return 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=600';
+  }
+  return 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=600';
+}
+
+export function GroupAvatar({ group, className = "w-14 h-14 rounded-2xl", showBadge = true }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const sport = group?.sportCategory || group?.sport || 'Football';
+  const imgUrl = getGroupImage(group);
+
+  const getGradient = (sp) => {
+    const s = String(sp).toLowerCase();
+    if (s.includes('badminton')) return 'from-emerald-600 to-teal-800';
+    if (s.includes('cricket')) return 'from-amber-600 to-orange-800';
+    if (s.includes('pickleball') || s.includes('padel') || s.includes('tennis')) return 'from-lime-600 to-emerald-800';
+    if (s.includes('bowling')) return 'from-cyan-600 to-blue-800';
+    return 'from-indigo-600 to-purple-800';
+  };
+
+  return (
+    <div className="relative flex-shrink-0">
+      {!imgFailed ? (
+        <img
+          src={imgUrl}
+          alt=""
+          onError={() => setImgFailed(true)}
+          className={`${className} object-cover border border-white/10 shadow-sm`}
+        />
+      ) : (
+        <div className={`${className} bg-gradient-to-br ${getGradient(sport)} flex items-center justify-center border border-white/10 shadow-sm text-white font-black text-xs`}>
+          <SportIcon sport={sport} className="w-6 h-6 text-white/90" />
+        </div>
+      )}
+      {showBadge && (
+        <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-lg bg-black/90 border border-white/20 flex items-center justify-center text-[10px]">
+          <SportIcon sport={sport} className="w-3.5 h-3.5 text-indigo-400" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Community({ user, setTab }) {
-  const currentUserId = user?.firebase_uid || user?.id || user?.uid || auth.currentUser?.uid || 'usr_amit_patel';
+  const currentUserId = user?.firebase_uid || user?.id || user?.uid || auth.currentUser?.uid || 'usr_guest';
   const currentUserName = user?.full_name || user?.displayName || user?.name || 'Athlete';
   const currentUserAvatar = user?.avatar || user?.avatarUrl || user?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUserId}`;
 
@@ -40,6 +110,18 @@ export default function Community({ user, setTab }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [athletes, setAthletes] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Friends & Live Search States
+  const [followedAthletes, setFollowedAthletes] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(`turfington_friends_${currentUserId}`) || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const followedAthletesSet = useMemo(() => new Set(followedAthletes), [followedAthletes]);
+  const [dynamicSearchResults, setDynamicSearchResults] = useState([]);
+  const [modalDynamicResults, setModalDynamicResults] = useState([]);
 
   // Modals
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -54,6 +136,57 @@ export default function Community({ user, setTab }) {
   // Push notifications
   const [notificationEnabled, setNotificationEnabled] = useState(false);
 
+  // Friend toggle handler
+  const handleToggleFriend = async (e, athleteId) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const isFollowing = followedAthletes.includes(athleteId);
+    const updated = isFollowing ? followedAthletes.filter(id => id !== athleteId) : [...followedAthletes, athleteId];
+    setFollowedAthletes(updated);
+    try {
+      localStorage.setItem(`turfington_friends_${currentUserId}`, JSON.stringify(updated));
+    } catch {}
+    await apiFollowUser(currentUserId, athleteId);
+  };
+
+  // Check if routed from Discovery to start a direct chat
+  useEffect(() => {
+    try {
+      const targetRaw = localStorage.getItem('turfington_target_chat_user');
+      if (targetRaw) {
+        localStorage.removeItem('turfington_target_chat_user');
+        const targetPlayer = JSON.parse(targetRaw);
+        if (targetPlayer) {
+          handleStartDirectChat(targetPlayer);
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Live player search effects
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setDynamicSearchResults([]);
+      return;
+    }
+    let active = true;
+    apiSearchUsers(searchQuery, currentUserId).then(results => {
+      if (active) setDynamicSearchResults(results);
+    });
+    return () => { active = false; };
+  }, [searchQuery, currentUserId]);
+
+  useEffect(() => {
+    if (!athleteModalSearch.trim()) {
+      setModalDynamicResults([]);
+      return;
+    }
+    let active = true;
+    apiSearchUsers(athleteModalSearch, currentUserId).then(results => {
+      if (active) setModalDynamicResults(results);
+    });
+    return () => { active = false; };
+  }, [athleteModalSearch, currentUserId]);
+
   // 1. Initial Setup: Seed default groups and subscribe to User's Inbox + Community Groups
   useEffect(() => {
     let isMounted = true;
@@ -67,11 +200,18 @@ export default function Community({ user, setTab }) {
       setInboxItems(items);
       setLoading(false);
 
-      // Keep active chat in sync with updated inbox item
+      // Keep active chat in sync with updated inbox item without changing id / remounting!
       setActiveChat(prev => {
         if (!prev) return null;
-        const matching = items.find(i => i.conversationId === (prev.conversationId || prev.id));
-        return matching ? { ...prev, ...matching } : prev;
+        const prevId = prev.id || prev.conversationId || prev.groupId;
+        const matching = items.find(i => (i.conversationId === prevId || i.id === prevId || i.groupId === prevId));
+        if (!matching) return prev;
+        return {
+          ...prev,
+          ...matching,
+          id: prevId,
+          conversationId: prevId
+        };
       });
     });
 
@@ -81,9 +221,16 @@ export default function Community({ user, setTab }) {
       setCommunityGroups(groups);
     });
 
-    // 3. Fetch athletes for direct messaging
+    // 3. Fetch athletes for direct messaging (strictly excluding venue owners)
     apiFetchAthletes(currentUserId).then(data => {
-      if (isMounted) setAthletes(data);
+      if (isMounted) {
+        const isOwner = (u) => {
+          const r = (u?.role || u?.userRole || u?.user_role || '').toLowerCase().trim();
+          const em = (u?.email || '').toLowerCase().trim();
+          return r === 'owner' || r === 'venue_owner' || r === 'turf_owner' || !!u?.is_owner || !!u?.venue_owner || em === 'owner123@gmail.cpm' || em === 'owner123@gmail.com' || em.startsWith('owner');
+        };
+        setAthletes((Array.isArray(data) ? data : []).filter(u => !isOwner(u)));
+      }
     });
 
     // 4. Notification status
@@ -91,10 +238,24 @@ export default function Community({ user, setTab }) {
       setNotificationEnabled(Notification.permission === 'granted');
     }
 
+    // 5. External chat open handler (from notification banner)
+    const handleOpenChat = (e) => {
+      if (!isMounted) return;
+      const convId = e.detail?.conversationId;
+      if (!convId) return;
+      setActiveTabMode('direct');
+      const target = inboxItems.find(i => (i.conversationId === convId || i.id === convId));
+      if (target) {
+        handleSelectChat(target);
+      }
+    };
+    window.addEventListener('turfington_open_chat', handleOpenChat);
+
     return () => {
       isMounted = false;
       unsubInbox();
       unsubGroups();
+      window.removeEventListener('turfington_open_chat', handleOpenChat);
     };
   }, [currentUserId, selectedSport]);
 
@@ -115,10 +276,20 @@ export default function Community({ user, setTab }) {
   }, [inboxItems]);
 
   const handleSelectChat = (chat) => {
+    if (!chat) return;
     const convId = chat.conversationId || chat.groupId || chat.id;
     const isGrp = chat.type === 'group' || (!chat.type && !!chat.groupId);
     const isMember = isGrp ? joinedGroupIds.has(convId) : true;
-    const inboxEntry = inboxItems.find(i => i.conversationId === convId);
+    const inboxEntry = inboxItems.find(i => (i.conversationId === convId || i.id === convId));
+
+    let otherUid = chat.otherUid || inboxEntry?.otherUid;
+    if (!otherUid && convId && convId.startsWith('direct_')) {
+      const parts = convId.replace('direct_', '').split('_');
+      otherUid = parts.find(p => p !== currentUserId) || null;
+    }
+
+    const partnerName = chat.title || chat.name || chat.groupName || inboxEntry?.title || inboxEntry?.name || 'Athlete';
+    const partnerAvatar = isGrp ? getGroupImage(chat) : (chat.avatarUrl || chat.avatar || inboxEntry?.avatarUrl || inboxEntry?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${otherUid || 'chat'}`);
 
     const formattedChat = {
       ...chat,
@@ -126,8 +297,12 @@ export default function Community({ user, setTab }) {
       conversationId: convId,
       groupId: isGrp ? convId : undefined,
       type: isGrp ? 'group' : 'direct',
-      name: chat.title || chat.name || chat.groupName || 'Sports Hub',
-      avatar: chat.avatarUrl || chat.imageUrl || chat.avatar || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=600',
+      name: partnerName,
+      title: partnerName,
+      avatar: partnerAvatar,
+      avatarUrl: partnerAvatar,
+      otherUid,
+      participants: chat.participants || (otherUid ? [currentUserId, otherUid] : [currentUserId]),
       isMember,
       isPinned: inboxEntry?.isPinned || false,
       isMuted: inboxEntry?.isMuted || false,
@@ -135,6 +310,7 @@ export default function Community({ user, setTab }) {
     };
     setActiveChat(formattedChat);
     markConversationAsRead(currentUserId, convId);
+    setInboxItems(prev => prev.map(i => (i.conversationId === convId || i.id === convId) ? { ...i, unreadCount: 0 } : i));
   };
 
   // Group membership toggle
@@ -162,25 +338,88 @@ export default function Community({ user, setTab }) {
   };
 
   // Start 1:1 Direct Message with an athlete
-  const handleStartDirectChat = async (athlete) => {
+  const handleStartDirectChat = async (athlete, e = null) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    if (!athlete) return;
     setShowNewChatModal(false);
-    const conv = await getOrCreateDirectConversation(user, athlete);
-    if (conv) {
+
+    try {
+      const athleteId = athlete.id || athlete.uid || athlete.firebase_uid;
+      if (!athleteId) return;
       const athleteName = athlete.displayName || athlete.full_name || athlete.name || 'Athlete';
-      const athleteAvatar = athlete.avatarUrl || athlete.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${athlete.id}`;
+      const athleteAvatar = athlete.avatarUrl || athlete.avatar || athlete.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${athleteId}`;
+
+      const me = {
+        id: currentUserId,
+        uid: currentUserId,
+        firebase_uid: currentUserId,
+        displayName: currentUserName,
+        name: currentUserName,
+        avatarUrl: currentUserAvatar,
+        avatar: currentUserAvatar,
+        is_google_user: !!(user?.is_google_user || user?.auth_provider === 'google' || auth.currentUser?.providerData?.some(p => p.providerId === 'google.com'))
+      };
+
+      let conv = null;
+      try {
+        conv = await getOrCreateDirectConversation(me, athlete);
+      } catch (err) {
+        console.warn('getOrCreateDirectConversation error:', err);
+      }
+
+      const convId = conv?.id || conv?.conversationId || getDirectConversationId(currentUserId, athleteId);
+
       const formatted = {
-        ...conv,
-        id: conv.id,
-        conversationId: conv.id,
+        ...(conv || {}),
+        id: convId,
+        conversationId: convId,
         type: 'direct',
         name: athleteName,
+        title: athleteName,
         avatar: athleteAvatar,
+        avatarUrl: athleteAvatar,
         isMember: true,
-        participants: [currentUserId, athlete.id || athlete.uid || athlete.firebase_uid]
+        participants: [currentUserId, athleteId]
       };
+
+      // Immediately add/ensure in inboxItems state so conversation is visible in Direct DMs list
+      setInboxItems(prev => {
+        const exists = prev.some(i => (i.conversationId === convId || i.id === convId));
+        if (exists) return prev;
+        const newInboxEntry = {
+          id: convId,
+          conversationId: convId,
+          type: 'direct',
+          title: athleteName,
+          name: athleteName,
+          avatarUrl: athleteAvatar,
+          otherUid: athleteId,
+          isEncrypted: true,
+          unreadCount: 0,
+          isPinned: false,
+          isMuted: false,
+          lastMessage: null,
+          lastMessageTimestamp: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        return [newInboxEntry, ...prev];
+      });
+
+      // Notify backend Express server
+      try {
+        fetch('http://localhost:5000/api/chats/direct', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user1Id: currentUserId, user2Id: athleteId })
+        }).catch(() => {});
+      } catch {}
+
       setActiveChat(formatted);
       setActiveTabMode('direct');
-      markConversationAsRead(currentUserId, conv.id);
+      markConversationAsRead(currentUserId, convId);
+    } catch (err) {
+      console.error('handleStartDirectChat error:', err);
     }
   };
 
@@ -243,10 +482,11 @@ export default function Community({ user, setTab }) {
 
   const filteredDirect = useMemo(() => {
     return inboxItems.filter(item => {
-      if (item.type !== 'direct') return false;
+      const isDirect = item.type === 'direct' || String(item.conversationId || item.id || '').startsWith('direct_');
+      if (!isDirect) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const title = (item.title || '').toLowerCase();
+        const title = (item.title || item.name || '').toLowerCase();
         const lastMsg = (item.lastMessage?.text || '').toLowerCase();
         return title.includes(q) || lastMsg.includes(q);
       }
@@ -254,26 +494,64 @@ export default function Community({ user, setTab }) {
     });
   }, [inboxItems, searchQuery]);
 
+  const isOwnerUser = (u) => {
+    if (!u) return false;
+    const r = (u.role || u.userRole || u.user_role || '').toLowerCase().trim();
+    const em = (u.email || '').toLowerCase().trim();
+    return r === 'owner' || r === 'venue_owner' || r === 'turf_owner' || !!u.is_owner || !!u.venue_owner || em === 'owner123@gmail.cpm' || em === 'owner123@gmail.com' || em.startsWith('owner');
+  };
+
   // Athletes matching the main search bar for direct instant messaging
   const matchingAthletesFromSearch = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase().trim();
-    return athletes.filter(a => {
+    const cleanQ = q.replace(/^@/, '');
+
+    const map = new Map();
+    // 1. Add dynamic search results from server/database
+    dynamicSearchResults.forEach(u => {
+      const uid = u.id || u.firebase_uid || u.uid;
+      if (uid && uid !== currentUserId && !NPC_TEST_USER_IDS.has(uid) && !isOwnerUser(u)) {
+        map.set(uid, u);
+      }
+    });
+
+    // 2. Add local athletes matching name, handle, player_id, email, or sport
+    athletes.forEach(a => {
+      const uid = a.id || a.firebase_uid || a.uid;
+      if (!uid || uid === currentUserId || NPC_TEST_USER_IDS.has(uid) || isOwnerUser(a)) return;
+
       const name = (a.name || a.full_name || a.displayName || '').toLowerCase();
+      const uName = (a.username || '').toLowerCase();
+      const pId = (a.player_id || a.handle || '').toLowerCase();
       const email = (a.email || '').toLowerCase();
       const sport = (a.sport || '').toLowerCase();
       const loc = (a.location || '').toLowerCase();
-      return name.includes(q) || email.includes(q) || sport.includes(q) || loc.includes(q);
+
+      if (
+        name.includes(cleanQ) ||
+        uName.includes(cleanQ) ||
+        pId.includes(q) ||
+        pId.includes(cleanQ) ||
+        email.includes(cleanQ) ||
+        sport.includes(cleanQ) ||
+        loc.includes(cleanQ)
+      ) {
+        if (!map.has(uid)) map.set(uid, a);
+      }
     });
-  }, [athletes, searchQuery]);
+
+    return Array.from(map.values());
+  }, [athletes, searchQuery, dynamicSearchResults, currentUserId]);
 
   // If user types a specific email into main search that isn't yet in preloaded list
   const directInviteAthlete = useMemo(() => {
     const q = searchQuery.trim();
     if (!q || !q.includes('@')) return null;
-    const exists = athletes.some(a => (a.email || '').toLowerCase() === q.toLowerCase());
-    if (exists) return null;
     const cleanEmail = q.toLowerCase();
+    if (cleanEmail === 'owner123@gmail.cpm' || cleanEmail === 'owner123@gmail.com' || cleanEmail.startsWith('owner')) return null;
+    const exists = athletes.some(a => (a.email || '').toLowerCase() === cleanEmail);
+    if (exists) return null;
     const id = 'usr_email_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
     return {
       id,
@@ -282,6 +560,8 @@ export default function Community({ user, setTab }) {
       name: cleanEmail.split('@')[0],
       full_name: cleanEmail.split('@')[0],
       displayName: cleanEmail.split('@')[0],
+      player_id: `@${cleanEmail.split('@')[0]}`,
+      handle: `@${cleanEmail.split('@')[0]}`,
       email: cleanEmail,
       auth_provider: 'google',
       is_google_user: true,
@@ -294,30 +574,64 @@ export default function Community({ user, setTab }) {
 
   // Athletes inside the Connect With Athletes modal
   const modalFilteredAthletes = useMemo(() => {
-    let list = athletes;
+    const map = new Map();
+
+    // 1. If searching, prioritize dynamic live database results
+    modalDynamicResults.forEach(u => {
+      const uid = u.id || u.firebase_uid || u.uid;
+      if (uid && uid !== currentUserId && !NPC_TEST_USER_IDS.has(uid) && !isOwnerUser(u)) {
+        map.set(uid, u);
+      }
+    });
+
+    // 2. Filter in-memory athletes
+    let baseList = athletes.filter(a => {
+      const uid = a.id || a.firebase_uid || a.uid;
+      return uid && uid !== currentUserId && !NPC_TEST_USER_IDS.has(uid) && !isOwnerUser(a);
+    });
+
     if (athleteFilterTab === 'google') {
-      list = list.filter(a => a.is_google_user || a.auth_provider === 'google' || a.email?.endsWith('@gmail.com'));
+      baseList = baseList.filter(a => a.is_google_user || a.auth_provider === 'google' || a.email?.endsWith('@gmail.com'));
     }
+
     if (athleteModalSearch.trim()) {
       const q = athleteModalSearch.toLowerCase().trim();
-      list = list.filter(a => {
+      const cleanQ = q.replace(/^@/, '');
+      baseList = baseList.filter(a => {
         const name = (a.name || a.full_name || a.displayName || '').toLowerCase();
+        const uName = (a.username || '').toLowerCase();
+        const pId = (a.player_id || a.handle || '').toLowerCase();
         const email = (a.email || '').toLowerCase();
         const sport = (a.sport || '').toLowerCase();
         const loc = (a.location || '').toLowerCase();
-        return name.includes(q) || email.includes(q) || sport.includes(q) || loc.includes(q);
+        return (
+          name.includes(cleanQ) ||
+          uName.includes(cleanQ) ||
+          pId.includes(q) ||
+          pId.includes(cleanQ) ||
+          email.includes(cleanQ) ||
+          sport.includes(cleanQ) ||
+          loc.includes(cleanQ)
+        );
       });
     }
-    return list;
-  }, [athletes, athleteFilterTab, athleteModalSearch]);
+
+    baseList.forEach(a => {
+      const uid = a.id || a.firebase_uid || a.uid;
+      if (!map.has(uid)) map.set(uid, a);
+    });
+
+    return Array.from(map.values());
+  }, [athletes, athleteFilterTab, athleteModalSearch, modalDynamicResults, currentUserId]);
 
   // If user types an email in the Connect modal that isn't yet in preloaded list
   const modalDirectInviteAthlete = useMemo(() => {
     const q = athleteModalSearch.trim();
     if (!q || !q.includes('@')) return null;
-    const exists = athletes.some(a => (a.email || '').toLowerCase() === q.toLowerCase());
-    if (exists) return null;
     const cleanEmail = q.toLowerCase();
+    if (cleanEmail === 'owner123@gmail.cpm' || cleanEmail === 'owner123@gmail.com' || cleanEmail.startsWith('owner')) return null;
+    const exists = athletes.some(a => (a.email || '').toLowerCase() === cleanEmail);
+    if (exists) return null;
     const id = 'usr_email_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
     return {
       id,
@@ -398,17 +712,17 @@ export default function Community({ user, setTab }) {
               className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition-all flex items-center gap-2 shadow-[0_0_20px_rgba(99,102,241,0.35)] cursor-pointer"
             >
               <UserPlus className="w-3.5 h-3.5" />
-              <span>Message Athlete</span>
+              <span>Find Athletes</span>
             </button>
           </div>
         </div>
       </div>
 
       {/* ── MAIN CONTENT CONTAINER (SPLIT PANE) ──────────────────── */}
-      <div className="max-w-7xl mx-auto w-full flex-grow flex p-3 sm:p-5 lg:p-6 gap-5 h-[calc(100vh-140px)]">
+      <div className="max-w-[1550px] mx-auto w-full flex-grow flex p-3 sm:p-5 lg:p-6 gap-5 h-[calc(100vh-140px)]">
         
-        {/* ── LEFT PANE: CONVERSATION LIST ── */}
-        <div className={`w-full lg:w-96 flex-shrink-0 flex flex-col bg-[#101014] border border-white/8 rounded-3xl overflow-hidden shadow-2xl ${
+        {/* ── LEFT PANE: CONVERSATION LIST (ENLARGED & SPACIOUS) ── */}
+        <div className={`w-full lg:w-[420px] xl:w-[460px] flex-shrink-0 flex flex-col bg-[#101014] border border-white/8 rounded-3xl overflow-hidden shadow-2xl ${
           activeChat ? 'hidden lg:flex' : 'flex'
         }`}>
           
@@ -521,35 +835,26 @@ export default function Community({ user, setTab }) {
                     <div
                       key={gid}
                       onClick={() => handleSelectChat(group)}
-                      className={`p-3.5 flex items-center gap-3 transition-colors cursor-pointer group ${
+                      className={`p-4 flex items-center gap-3.5 transition-colors cursor-pointer group ${
                         isSelected
                           ? 'bg-indigo-600/15 border-l-4 border-indigo-500'
                           : 'hover:bg-white/[0.04]'
                       }`}
                     >
                       {/* Avatar */}
-                      <div className="relative flex-shrink-0">
-                        <img
-                          src={group.imageUrl}
-                          alt={group.name}
-                          className="w-11 h-11 rounded-2xl object-cover border border-white/10 shadow-sm"
-                        />
-                        <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-lg bg-black/90 border border-white/20 flex items-center justify-center text-[10px]">
-                          <SportIcon sport={group.sportCategory || 'Football'} className="w-3 h-3 text-indigo-400" />
-                        </div>
-                      </div>
+                      <GroupAvatar group={group} className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl" showBadge={true} />
 
                       {/* Details */}
                       <div className="flex-grow min-w-0">
                         <div className="flex items-center justify-between gap-1">
                           <div className="flex items-center gap-1.5 truncate">
-                            {isPinned && <Pin className="w-3 h-3 text-amber-400 flex-shrink-0 rotate-45" />}
-                            <h4 className="font-display font-black text-xs text-white truncate tracking-tight">
+                            {isPinned && <Pin className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 rotate-45" />}
+                            <h4 className="font-display font-black text-sm text-white truncate tracking-tight">
                               {group.name}
                             </h4>
                           </div>
 
-                          <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase flex-shrink-0 ${
+                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase flex-shrink-0 ${
                             isJoined
                               ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
                               : 'bg-white/5 text-neutral-400 border border-white/10'
@@ -559,21 +864,21 @@ export default function Community({ user, setTab }) {
                         </div>
 
                         <div className="flex items-center justify-between gap-2 mt-1">
-                          <p className="text-[11px] text-neutral-400 truncate font-light">
+                          <p className="text-xs text-neutral-400 truncate font-normal">
                             {lastSnippet}
                           </p>
 
                           <div className="flex items-center gap-1.5 flex-shrink-0">
-                            {isMuted && <VolumeX className="w-3 h-3 text-neutral-500" />}
+                            {isMuted && <VolumeX className="w-3.5 h-3.5 text-neutral-500" />}
                             {unread > 0 && (
-                              <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black shadow-md">
+                              <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black shadow-md">
                                 {unread}
                               </span>
                             )}
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between text-[10px] text-neutral-500 mt-1">
+                        <div className="flex items-center justify-between text-xs text-neutral-500 mt-1.5">
                           <span>{group.memberCount || 1} members • {group.locationReference || 'Chennai'}</span>
                           {isJoined && (
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -582,14 +887,14 @@ export default function Community({ user, setTab }) {
                                 onClick={(e) => handleTogglePin(e, gid, isPinned)}
                                 className="p-1 hover:text-amber-400"
                               >
-                                <Pin className="w-2.5 h-2.5" />
+                                <Pin className="w-3 h-3" />
                               </button>
                               <button
                                 title={isMuted ? 'Unmute' : 'Mute'}
                                 onClick={(e) => handleToggleMute(e, gid, isMuted)}
                                 className="p-1 hover:text-neutral-300"
                               >
-                                {isMuted ? <Volume2 className="w-2.5 h-2.5" /> : <VolumeX className="w-2.5 h-2.5" />}
+                                {isMuted ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
                               </button>
                             </div>
                           )}
@@ -615,8 +920,16 @@ export default function Community({ user, setTab }) {
                     </p>
                   </div>
                   <button
+                    type="button"
                     onClick={() => {
-                      apiFetchAthletes(currentUserId).then(data => setAthletes(data));
+                      apiFetchAthletes(currentUserId).then(data => {
+                        const isOwner = (u) => {
+                          const r = (u?.role || u?.userRole || u?.user_role || '').toLowerCase().trim();
+                          const em = (u?.email || '').toLowerCase().trim();
+                          return r === 'owner' || r === 'venue_owner' || r === 'turf_owner' || !!u?.is_owner || !!u?.venue_owner || em === 'owner123@gmail.cpm' || em === 'owner123@gmail.com' || em.startsWith('owner');
+                        };
+                        setAthletes((Array.isArray(data) ? data : []).filter(u => !isOwner(u)));
+                      });
                       setShowNewChatModal(true);
                     }}
                     className="px-3.5 py-1.5 bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 text-xs font-bold rounded-xl hover:bg-indigo-600 hover:text-white transition-all cursor-pointer"
@@ -672,7 +985,7 @@ export default function Community({ user, setTab }) {
                       <div
                         key={item.conversationId}
                         onClick={() => handleSelectChat(item)}
-                        className={`p-3.5 flex items-center gap-3 transition-colors cursor-pointer group ${
+                        className={`p-4 flex items-center gap-3.5 transition-colors cursor-pointer group ${
                           isSelected
                             ? 'bg-indigo-600/15 border-l-4 border-indigo-500'
                             : 'hover:bg-white/[0.04]'
@@ -683,28 +996,28 @@ export default function Community({ user, setTab }) {
                           <img
                             src={item.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${item.conversationId}`}
                             alt={item.title}
-                            className="w-11 h-11 rounded-2xl object-cover border border-white/10 shadow-sm"
+                            className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl object-cover border border-white/10 shadow-sm"
                           />
-                          <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-[#101014]" />
+                          <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-[#101014]" />
                         </div>
 
                         {/* Details */}
                         <div className="flex-grow min-w-0">
                           <div className="flex items-center justify-between gap-1">
                             <div className="flex items-center gap-1.5 truncate">
-                              {item.isPinned && <Pin className="w-3 h-3 text-amber-400 flex-shrink-0 rotate-45" />}
-                              <h4 className="font-display font-black text-xs text-white truncate tracking-tight">
+                              {item.isPinned && <Pin className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 rotate-45" />}
+                              <h4 className="font-display font-black text-sm text-white truncate tracking-tight">
                                 {item.title}
                               </h4>
                             </div>
 
-                            <span className="text-[10px] text-neutral-500 flex-shrink-0">
+                            <span className="text-xs text-neutral-500 flex-shrink-0">
                               {timeFormatted}
                             </span>
                           </div>
 
                           <div className="flex items-center justify-between gap-2 mt-1">
-                            <p className="text-[11px] text-neutral-400 truncate font-light flex items-center gap-1">
+                            <p className="text-xs text-neutral-400 truncate font-normal flex items-center gap-1">
                               {item.lastMessage?.senderName && (
                                 <span className="font-semibold text-neutral-300">
                                   {item.lastMessage.senderUid === currentUserId ? 'You: ' : `${item.lastMessage.senderName}: `}
@@ -714,10 +1027,10 @@ export default function Community({ user, setTab }) {
                             </p>
 
                             <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <Lock className="w-2.5 h-2.5 text-emerald-400/80" title="End-to-End Encrypted" />
-                              {item.isMuted && <VolumeX className="w-3 h-3 text-neutral-500" />}
+                              <Lock className="w-3 h-3 text-emerald-400/80" title="End-to-End Encrypted" />
+                              {item.isMuted && <VolumeX className="w-3.5 h-3.5 text-neutral-500" />}
                               {unread > 0 && (
-                                <span className="px-1.5 py-0.5 rounded-full bg-indigo-600 text-white text-[9px] font-black shadow-md">
+                                <span className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-black shadow-md">
                                   {unread}
                                 </span>
                               )}
@@ -753,51 +1066,76 @@ export default function Community({ user, setTab }) {
                         <span>Athletes & Google Accounts ({matchingAthletesFromSearch.length})</span>
                         <span className="text-[9px] text-indigo-400 font-medium">Tap to Message</span>
                       </div>
-                      {matchingAthletesFromSearch.map(athlete => (
-                        <div
-                          key={'search_' + athlete.id}
-                          onClick={() => handleStartDirectChat(athlete)}
-                          className="p-3 mx-2 my-1 flex items-center justify-between bg-white/[0.02] hover:bg-white/[0.06] rounded-2xl border border-white/6 transition-colors cursor-pointer group"
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="relative flex-shrink-0">
-                              <img
-                                src={athlete.avatar || athlete.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${athlete.id}`}
-                                alt=""
-                                className="w-9 h-9 rounded-xl object-cover border border-white/10"
-                              />
-                              {athlete.is_google_user && (
-                                <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-blue-600 border border-black flex items-center justify-center text-[7px] text-white font-black" title="Google Verified">
-                                  G
-                                </span>
-                              )}
-                            </div>
-                            <div className="truncate">
-                              <div className="flex items-center gap-1.5">
-                                <p className="text-xs font-bold text-white group-hover:text-indigo-400 transition-colors truncate">
-                                  {athlete.full_name || athlete.name}
-                                </p>
+                      {matchingAthletesFromSearch.map(athlete => {
+                        const isFriend = followedAthletesSet.has(athlete.id);
+                        const playerId = athlete.player_id || athlete.handle || (athlete.username ? `@${athlete.username}` : '');
+                        return (
+                          <div
+                            key={'search_' + athlete.id}
+                            onClick={() => handleStartDirectChat(athlete)}
+                            className="p-3 mx-2 my-1 flex items-center justify-between bg-white/[0.02] hover:bg-white/[0.06] rounded-2xl border border-white/6 transition-colors cursor-pointer group"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="relative flex-shrink-0">
+                                <img
+                                  src={athlete.avatar || athlete.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${athlete.id}`}
+                                  alt=""
+                                  className="w-9 h-9 rounded-xl object-cover border border-white/10"
+                                />
                                 {athlete.is_google_user && (
-                                  <span className="px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-400 text-[8px] font-bold">
-                                    Google
+                                  <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-blue-600 border border-black flex items-center justify-center text-[7px] text-white font-black" title="Google Verified">
+                                    G
                                   </span>
                                 )}
                               </div>
-                              <p className="text-[10px] text-neutral-400 truncate font-light">
-                                {athlete.email ? <span className="text-neutral-300 font-mono">{athlete.email}</span> : (athlete.sport || 'Sports Athlete')}
-                              </p>
+                              <div className="truncate">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-xs font-bold text-white group-hover:text-indigo-400 transition-colors truncate">
+                                    {athlete.full_name || athlete.name}
+                                  </p>
+                                  {athlete.is_google_user && (
+                                    <span className="px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-400 text-[8px] font-bold">
+                                      Google
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 truncate mt-0.5">
+                                  {playerId && (
+                                    <span className="text-indigo-400 font-mono font-bold bg-indigo-500/10 px-1 py-0.2 rounded text-[9px]">{playerId}</span>
+                                  )}
+                                  {athlete.email ? (
+                                    <span className="text-neutral-400 font-mono truncate">{athlete.email}</span>
+                                  ) : (
+                                    <span>{athlete.sport || 'Sports Athlete'}</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => handleToggleFriend(e, athlete.id)}
+                                className={`px-2 py-1 rounded-xl text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                                  isFriend
+                                    ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30'
+                                    : 'bg-white/5 text-neutral-300 hover:bg-white/10 hover:text-white border border-white/10'
+                                }`}
+                              >
+                                {isFriend ? <UserCheck className="w-2.5 h-2.5" /> : <UserPlus className="w-2.5 h-2.5" />}
+                                <span>{isFriend ? 'Friends' : 'Add Friend+'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleStartDirectChat(athlete); }}
+                                className="px-2.5 py-1 rounded-xl bg-indigo-600 text-white text-[11px] font-bold hover:bg-indigo-500 transition-all flex items-center gap-1 shadow-sm flex-shrink-0 cursor-pointer"
+                              >
+                                <Lock className="w-2.5 h-2.5 text-emerald-300" />
+                                <span>Message</span>
+                              </button>
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); handleStartDirectChat(athlete); }}
-                            className="px-2.5 py-1 rounded-xl bg-indigo-600 text-white text-[11px] font-bold hover:bg-indigo-500 transition-all flex items-center gap-1 shadow-sm flex-shrink-0 cursor-pointer"
-                          >
-                            <Lock className="w-2.5 h-2.5 text-emerald-300" />
-                            <span>Chat</span>
-                          </button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </>
@@ -859,11 +1197,7 @@ export default function Community({ user, setTab }) {
                         onClick={() => handleSelectChat(group)}
                         className="p-2.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/8 transition-all flex items-center gap-2.5 text-left cursor-pointer group"
                       >
-                        <img
-                          src={group.imageUrl}
-                          alt=""
-                          className="w-8 h-8 rounded-xl object-cover flex-shrink-0"
-                        />
+                        <GroupAvatar group={group} className="w-8 h-8 rounded-xl" showBadge={false} />
                         <div className="min-w-0 flex-grow">
                           <p className="text-xs font-bold text-white truncate group-hover:text-indigo-400 transition-colors">
                             {group.name}
@@ -894,12 +1228,12 @@ export default function Community({ user, setTab }) {
               <div className="p-5 border-b border-white/8 flex items-center justify-between">
                 <div>
                   <h3 className="font-display font-black text-white text-base tracking-tight uppercase flex items-center gap-2">
-                    <span>Connect With Athletes</span>
+                    <span>Find Athletes & Connect</span>
                     <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-bold flex items-center gap-1">
                       <Lock className="w-2.5 h-2.5" /> E2EE
                     </span>
                   </h3>
-                  <p className="text-[11px] text-neutral-400">Search Google accounts & athletes for secure 1:1 direct chat</p>
+                  <p className="text-[11px] text-neutral-400">Search players by Player ID or name to add friends & chat</p>
                 </div>
                 <button
                   onClick={() => setShowNewChatModal(false)}
@@ -917,7 +1251,7 @@ export default function Community({ user, setTab }) {
                     type="text"
                     value={athleteModalSearch}
                     onChange={(e) => setAthleteModalSearch(e.target.value)}
-                    placeholder="Search by athlete name, Google email, or sport..."
+                    placeholder="Search by Player ID (e.g. @player), name, or email..."
                     className="w-full bg-transparent text-xs text-white placeholder-neutral-500 focus:outline-none"
                     autoFocus
                   />
@@ -997,58 +1331,91 @@ export default function Community({ user, setTab }) {
 
                 {modalFilteredAthletes.length === 0 && !modalDirectInviteAthlete ? (
                   <div className="text-center py-8 space-y-2">
-                    <p className="text-xs text-neutral-400 font-bold">No athletes found</p>
+                    <p className="text-xs text-neutral-400 font-bold">No users found</p>
                     <p className="text-[11px] text-neutral-500">
-                      {athleteModalSearch ? `No matches for "${athleteModalSearch}".` : 'No athletes match the selected filter.'}
+                      {athleteModalSearch ? `No users found matching "${athleteModalSearch}".` : 'No users found.'}
                     </p>
                   </div>
                 ) : (
-                  modalFilteredAthletes.map(athlete => (
-                    <div
-                      key={athlete.id}
-                      onClick={() => handleStartDirectChat(athlete)}
-                      className="py-3 px-2 flex items-center justify-between hover:bg-white/[0.04] rounded-2xl transition-colors cursor-pointer group"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="relative flex-shrink-0">
-                          <img
-                            src={athlete.avatar || athlete.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${athlete.id}`}
-                            alt=""
-                            className="w-11 h-11 rounded-2xl object-cover border border-white/10"
-                          />
-                          {athlete.is_google_user && (
-                            <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-blue-600 border border-black flex items-center justify-center text-[8px] text-white font-black" title="Signed in with Google">
-                              G
-                            </span>
-                          )}
-                        </div>
-                        <div className="truncate">
-                          <div className="flex items-center gap-2 truncate">
-                            <p className="text-xs font-bold text-white group-hover:text-indigo-400 transition-colors truncate">
-                              {athlete.full_name || athlete.name}
-                            </p>
+                  modalFilteredAthletes.map(athlete => {
+                    const isFriend = followedAthletesSet.has(athlete.id);
+                    const playerId = athlete.player_id || athlete.handle || (athlete.username ? `@${athlete.username}` : '');
+                    return (
+                      <div
+                        key={athlete.id}
+                        onClick={() => handleStartDirectChat(athlete)}
+                        className="py-3 px-3 flex items-center justify-between hover:bg-white/[0.04] rounded-2xl transition-colors cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="relative flex-shrink-0">
+                            <img
+                              src={athlete.avatar || athlete.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${athlete.id}`}
+                              alt=""
+                              className="w-11 h-11 rounded-2xl object-cover border border-white/10"
+                            />
                             {athlete.is_google_user && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/15 border border-blue-500/25 text-blue-400 text-[9px] font-extrabold flex-shrink-0">
-                                Google
+                              <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-blue-600 border border-black flex items-center justify-center text-[8px] text-white font-black" title="Signed in with Google">
+                                G
                               </span>
                             )}
                           </div>
-                          <p className="text-[10px] text-neutral-400 truncate mt-0.5">
-                            {athlete.email ? <span className="text-neutral-300 font-mono">{athlete.email}</span> : (athlete.sport || 'Sports Athlete')} • {athlete.location || 'Chennai'}
-                          </p>
+                          <div className="truncate">
+                            <div className="flex items-center gap-2 truncate">
+                              <p className="text-xs font-bold text-white group-hover:text-indigo-400 transition-colors truncate">
+                                {athlete.full_name || athlete.name}
+                              </p>
+                              {playerId && (
+                                <span className="text-[10px] text-indigo-400 font-mono font-bold bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded-md">
+                                  {playerId}
+                                </span>
+                              )}
+                              {athlete.is_google_user && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/15 border border-blue-500/25 text-blue-400 text-[9px] font-extrabold flex-shrink-0">
+                                  Google
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-neutral-400 truncate mt-0.5">
+                              {athlete.email ? <span className="text-neutral-300 font-mono">{athlete.email}</span> : (athlete.sport || 'Sports Athlete')} • {athlete.location || 'Chennai'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => handleToggleFriend(e, athlete.id)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                              isFriend
+                                ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30'
+                                : 'bg-white/5 text-neutral-300 hover:bg-white/10 hover:text-white border border-white/10'
+                            }`}
+                          >
+                            {isFriend ? (
+                              <>
+                                <UserCheck className="w-3 h-3" />
+                                <span>Friends</span>
+                              </>
+                            ) : (
+                              <>
+                                <UserPlus className="w-3 h-3" />
+                                <span>Add Friend+</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button 
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleStartDirectChat(athlete); }}
+                            className="px-3.5 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-500 transition-all flex items-center gap-1.5 shadow-md shadow-indigo-600/30 flex-shrink-0 cursor-pointer"
+                          >
+                            <Lock className="w-3 h-3 text-emerald-300" />
+                            <span>Message</span>
+                          </button>
                         </div>
                       </div>
-
-                      <button 
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleStartDirectChat(athlete); }}
-                        className="px-3.5 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-500 transition-all flex items-center gap-1.5 shadow-md shadow-indigo-600/30 flex-shrink-0 cursor-pointer"
-                      >
-                        <Lock className="w-3 h-3 text-emerald-300" />
-                        <span>Message</span>
-                      </button>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </motion.div>

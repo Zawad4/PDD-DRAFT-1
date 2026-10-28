@@ -14,6 +14,7 @@ import {
   subscribeToConversationRealtime
 } from '../services/db';
 import {
+  getLocalMessages,
   subscribeToMessages,
   loadMoreMessages,
   sendChatMessage,
@@ -34,9 +35,17 @@ export default function ChatWindowEnhanced({
   onLeaveGroup = null,
   contextBanner = null // { type: 'marketplace'|'venue'|'game', title, price, image, subtitle }
 }) {
-  const [messages, setMessages] = useState([]);
+  const conversationId = chat?.id || chat?.conversationId || chat?.groupId;
+
+  // 0. Instantly populate messages from local persistent store (0ms thread continuation!)
+  const [messages, setMessages] = useState(() => {
+    return conversationId ? getLocalMessages(conversationId) : [];
+  });
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    const init = conversationId ? getLocalMessages(conversationId) : [];
+    return init.length === 0;
+  });
   const [sending, setSending] = useState(false);
 
   // Pagination states
@@ -69,21 +78,31 @@ export default function ChatWindowEnhanced({
 
   // 1. Initial Load & Realtime Setup with pagination
   useEffect(() => {
+    if (!conversationId) return;
     let isMounted = true;
-    setLoading(true);
 
-    // Subscribe to paginated real-time messages from Firestore
-    const unsubMessages = subscribeToMessages(chat.id, ({ messages: liveMessages, oldestDoc, hasMore: moreAvailable }) => {
+    // Immediately synchronize with local messages on mount/switch
+    const local = getLocalMessages(conversationId);
+    if (local && local.length > 0) {
+      setMessages(local);
+      setLoading(false);
+    }
+
+    // Subscribe to paginated real-time messages from Firestore & local storage
+    const unsubMessages = subscribeToMessages(conversationId, (res) => {
       if (!isMounted) return;
+      const liveMessages = Array.isArray(res) ? res : (res?.messages || []);
+      const oldestDoc = res?.oldestDoc || null;
+      const moreAvailable = !!res?.hasMore;
       setMessages(liveMessages);
       setOldestDocCursor(oldestDoc);
       setHasMore(moreAvailable);
       setLoading(false);
-      markConversationAsRead(currentUserId, chat.id);
+      markConversationAsRead(currentUserId, conversationId);
     }, 35);
 
     // Setup Typing & Presence
-    const subscription = subscribeToConversationRealtime(chat.id, {
+    const subscription = subscribeToConversationRealtime(conversationId, {
       onReaction: () => {},
       onTyping: (payload) => {
         if (!isMounted) return;
@@ -112,7 +131,7 @@ export default function ChatWindowEnhanced({
       unsubMessages();
       subscription.unsubscribe();
     };
-  }, [chat.id, currentUserId]);
+  }, [conversationId, currentUserId]);
 
   // Auto scroll to bottom
   useEffect(() => {
@@ -133,9 +152,9 @@ export default function ChatWindowEnhanced({
 
   // Handle Load More messages (Pagination)
   const handleLoadMore = async () => {
-    if (!oldestDocCursor || loadingMore) return;
+    if (!oldestDocCursor || loadingMore || !conversationId) return;
     setLoadingMore(true);
-    const res = await loadMoreMessages(chat.id, oldestDocCursor, 25);
+    const res = await loadMoreMessages(conversationId, oldestDocCursor, 25);
     setLoadingMore(false);
     if (res.messages && res.messages.length > 0) {
       setMessages(prev => [...res.messages, ...prev]);
@@ -149,10 +168,10 @@ export default function ChatWindowEnhanced({
   // Handle File Attachment Upload
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !conversationId) return;
 
     setUploadingFile(true);
-    const res = await apiUploadChatAttachment(file, chat.id);
+    const res = await apiUploadChatAttachment(file, conversationId);
     setUploadingFile(false);
 
     if (res.success) {
@@ -162,7 +181,11 @@ export default function ChatWindowEnhanced({
 
   // Send Message
   const handleSendMessage = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
+    if (e) {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
+    }
+    if (!conversationId) return;
     if (!input.trim() && attachments.length === 0) return;
 
     const textToSend = input.trim();
@@ -172,7 +195,7 @@ export default function ChatWindowEnhanced({
     setInput('');
     setReplyToMsg(null);
     setAttachments([]);
-    setSending(true);
+    setSending(false);
 
     if (realtimeRef.current) {
       realtimeRef.current.sendTypingStatus({ id: currentUserId, name: currentUserName }, false);
@@ -180,12 +203,12 @@ export default function ChatWindowEnhanced({
 
     const idempotencyKey = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-    // Optimistic UI insertion
-    const tempMsg = {
+    // Instant UI insertion with status: 'sent' (zero-latency message delivery)
+    const newMsg = {
       id: idempotencyKey,
       idempotency_key: idempotencyKey,
-      conversation_id: chat.id,
-      conversationId: chat.id,
+      conversation_id: conversationId,
+      conversationId: conversationId,
       sender_id: currentUserId,
       senderUid: currentUserId,
       user: currentUserName,
@@ -198,14 +221,19 @@ export default function ChatWindowEnhanced({
       replyToId: currentReply?.id || null,
       attachments: currentAttachments,
       reactions: {},
-      status: 'sending',
+      status: 'sent',
       created_at: new Date().toISOString()
     };
 
-    setMessages(prev => [...prev, tempMsg]);
+    setMessages(prev => [...prev, newMsg]);
 
-    const res = await sendChatMessage(
-      chat.id,
+    const recipientUid = chat?.otherUid || (chat?.participants || []).find(id => id !== currentUserId) || null;
+    const recipientName = chat?.name || chat?.title || 'Athlete';
+    const recipientAvatar = chat?.avatar || chat?.avatarUrl || '';
+
+    // Non-blocking background dispatch
+    sendChatMessage(
+      conversationId,
       {
         uid: currentUserId,
         id: currentUserId,
@@ -217,6 +245,11 @@ export default function ChatWindowEnhanced({
       },
       textToSend,
       {
+        idempotencyKey,
+        messageId: idempotencyKey,
+        recipientUid,
+        recipientName,
+        recipientAvatar,
         type: currentAttachments.length > 0 ? 'image' : 'text',
         attachmentUrl: currentAttachments[0]?.url || null,
         attachmentMetadata: currentAttachments[0] ? {
@@ -227,12 +260,13 @@ export default function ChatWindowEnhanced({
         replyToId: currentReply?.id || null,
         replyToSnippet: currentReply?.text || currentReply?.content || null
       }
-    );
-
-    setSending(false);
-    if (res && res.id) {
-      setMessages(prev => prev.map(m => (m.id === idempotencyKey || m.idempotency_key === idempotencyKey) ? { ...res, status: 'sent' } : m));
-    }
+    ).then(res => {
+      if (res && res.id) {
+        setMessages(prev => prev.map(m => (m.id === idempotencyKey || m.idempotency_key === idempotencyKey) ? { ...m, ...res, status: 'sent' } : m));
+      }
+    }).catch(err => {
+      console.warn('sendChatMessage background error:', err);
+    });
   };
 
   // Reactions
@@ -258,34 +292,35 @@ export default function ChatWindowEnhanced({
 
   // Edit Message
   const handleSaveEdit = async (msgId) => {
-    if (!editInput.trim()) return;
+    if (!editInput.trim() || !conversationId) return;
     const text = editInput.trim();
     setEditingMsg(null);
     setEditInput('');
-    await editChatMessage(chat.id, msgId, currentUserId, text);
+    await editChatMessage(conversationId, msgId, currentUserId, text);
     setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text, content: text, edited_at: new Date().toISOString() } : m));
   };
 
   // Delete Message
   const handleDeleteMsg = async (msgId) => {
-    await deleteChatMessage(chat.id, msgId, currentUserId);
+    if (!conversationId) return;
+    await deleteChatMessage(conversationId, msgId, currentUserId);
     setMessages(prev => prev.map(m => m.id === msgId ? { ...m, text: 'This message was deleted', content: 'This message was deleted', isDeleted: true, deleted_at: new Date().toISOString() } : m));
   };
 
   // Block & Report
   const handleBlockUser = async () => {
     setHeaderMenuOpen(false);
-    const targetId = chat.participants?.find(p => p !== currentUserId) || chat.created_by;
+    const targetId = chat?.participants?.find(p => p !== currentUserId) || chat?.created_by;
     await apiBlockUser(currentUserId, targetId, 'block');
-    alert(`User ${chat.user || chat.name} has been blocked.`);
+    alert(`User ${chat?.user || chat?.name} has been blocked.`);
   };
 
   const handleReportUser = async () => {
     setHeaderMenuOpen(false);
     const reason = prompt("Enter reason for reporting this user/conversation:");
     if (reason) {
-      const targetId = chat.participants?.find(p => p !== currentUserId) || chat.created_by;
-      await apiSubmitReport({ reporterId: currentUserId, reportedUserId: targetId, conversationId: chat.id, reason });
+      const targetId = chat?.participants?.find(p => p !== currentUserId) || chat?.created_by;
+      await apiSubmitReport({ reporterId: currentUserId, reportedUserId: targetId, conversationId: conversationId, reason });
       alert("Report submitted to moderation team. Thank you.");
     }
   };
@@ -313,8 +348,15 @@ export default function ChatWindowEnhanced({
 
           <div className="relative flex-shrink-0">
             <img
-              src={chat.avatar || chat.avatar_url || chat.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=200'}
+              src={chat.avatar || chat.avatar_url || chat.image_url || '/football_group.jpg'}
               alt={chat.name || chat.user}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                const sport = String(chat?.sport || chat?.sportCategory || chat?.name || '').toLowerCase();
+                if (sport.includes('badminton') || sport.includes('smasher')) e.currentTarget.src = '/badminton_group.jpg';
+                else if (sport.includes('cricket')) e.currentTarget.src = '/cricket_group.jpg';
+                else e.currentTarget.src = '/football_group.jpg';
+              }}
               className="w-10 h-10 rounded-2xl object-cover border border-white/15 shadow-md"
             />
             <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0a0a0d] ${isOnline ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-neutral-600'}`} />

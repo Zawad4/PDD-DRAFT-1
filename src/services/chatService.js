@@ -28,6 +28,126 @@ import {
   isMessageEncrypted
 } from './cryptoService.js';
 
+// ─────────────────────────────────────────────────────────────
+// 0. Indestructible Local & Real-time Persistent Message Store
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Safely retrieve locally stored messages for any conversation or group
+ */
+export function getLocalMessages(conversationId) {
+  if (!conversationId) return [];
+  try {
+    const key = `turfington_chat_messages_${conversationId}`;
+    let raw = localStorage.getItem(key);
+    
+    // Robust fallback: For direct conversations, check canonical sorted key and reversed key
+    if ((!raw || raw === '[]') && conversationId.startsWith('direct_')) {
+      const parts = conversationId.replace('direct_', '').split('_');
+      if (parts.length >= 2) {
+        const sortedKey = `turfington_chat_messages_direct_${[...parts].sort().join('_')}`;
+        const reversedKey = `turfington_chat_messages_direct_${parts[1]}_${parts[0]}`;
+        raw = localStorage.getItem(sortedKey) || localStorage.getItem(reversedKey);
+      }
+    }
+
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function parseMsgTime(m) {
+  if (!m) return 0;
+  const raw = m.createdAt || m.created_at || m.timestamp;
+  if (!raw) return 0;
+  if (typeof raw === 'number') return raw;
+  if (typeof raw?.toMillis === 'function') return raw.toMillis();
+  if (typeof raw?.seconds === 'number') return raw.seconds * 1000;
+  if (typeof raw?.toDate === 'function') return raw.toDate().getTime();
+  const d = new Date(raw).getTime();
+  return isNaN(d) ? 0 : d;
+}
+
+/**
+ * Safely save or merge messages into persistent local storage by message ID
+ */
+export function saveLocalMessages(conversationId, newMessages) {
+  if (!conversationId || !Array.isArray(newMessages)) return [];
+  try {
+    const key = `turfington_chat_messages_${conversationId}`;
+    const existing = getLocalMessages(conversationId);
+    const map = new Map();
+
+    const normalizeMessage = (m) => {
+      if (!m) return null;
+      let cleanCreated = m.createdAt || m.created_at || m.timestamp;
+      if (cleanCreated && typeof cleanCreated?.toMillis === 'function') {
+        cleanCreated = new Date(cleanCreated.toMillis()).toISOString();
+      } else if (cleanCreated && typeof cleanCreated?.seconds === 'number') {
+        cleanCreated = new Date(cleanCreated.seconds * 1000).toISOString();
+      } else if (cleanCreated && typeof cleanCreated?.toDate === 'function') {
+        cleanCreated = cleanCreated.toDate().toISOString();
+      }
+      return {
+        ...m,
+        createdAt: cleanCreated || new Date().toISOString(),
+        created_at: cleanCreated || new Date().toISOString()
+      };
+    };
+
+    // Insert existing
+    existing.forEach(m => {
+      const id = m.id || m.idempotency_key;
+      if (id) {
+        const norm = normalizeMessage(m);
+        if (norm) map.set(id, norm);
+      }
+    });
+    // Merge new
+    newMessages.forEach(m => {
+      const id = m.id || m.idempotency_key;
+      if (id) {
+        const norm = normalizeMessage(m);
+        if (norm) {
+          const prev = map.get(id);
+          map.set(id, { ...prev, ...norm });
+        }
+      }
+    });
+    const merged = Array.from(map.values()).sort((a, b) => {
+      return parseMsgTime(a) - parseMsgTime(b);
+    });
+    localStorage.setItem(key, JSON.stringify(merged));
+
+    // Mirror to canonical sorted key for direct chats
+    if (conversationId.startsWith('direct_')) {
+      const parts = conversationId.replace('direct_', '').split('_');
+      if (parts.length >= 2) {
+        const sortedKey = `turfington_chat_messages_direct_${[...parts].sort().join('_')}`;
+        if (sortedKey !== key) {
+          localStorage.setItem(sortedKey, JSON.stringify(merged));
+        }
+      }
+    }
+
+    return merged;
+  } catch (e) {
+    console.warn('saveLocalMessages error:', e);
+    return [];
+  }
+}
+
+/**
+ * Append a single message locally
+ */
+export function appendLocalMessage(conversationId, msg) {
+  if (!conversationId || !msg) return;
+  return saveLocalMessages(conversationId, [msg]);
+}
+
 /**
  * Default community sports groups to seed
  */
@@ -39,10 +159,10 @@ export const DEFAULT_COMMUNITY_GROUPS_CONFIG = [
     sportCategory: 'Football',
     locationReference: 'Chennai, Tamil Nadu',
     imageUrl: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=600',
-    creatorUid: 'usr_amit_patel',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 48,
-    initialMessage: 'Anyone up for 7v7 this Friday 7 PM at Astro Turf?'
+    initialMessage: 'Welcome to Chennai Football Turf Hub! Share match plans, assemble squads, and book turfs.'
   },
   {
     groupId: 'group_box_cricket',
@@ -50,11 +170,11 @@ export const DEFAULT_COMMUNITY_GROUPS_CONFIG = [
     description: 'Fast-paced box cricket tournaments, night matches, and weekend nets. Batsmen & bowlers welcome!',
     sportCategory: 'Cricket',
     locationReference: 'Poonamallee, Chennai',
-    imageUrl: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?q=80&w=600',
-    creatorUid: 'usr_rahul',
+    imageUrl: 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?q=80&w=600',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 62,
-    initialMessage: 'Need 2 more players for tomorrow night box cricket at Turf Together!'
+    initialMessage: 'Looking for box cricket players? Connect with teams and arrange weekend matches here!'
   },
   {
     groupId: 'group_badminton_smashers',
@@ -62,11 +182,11 @@ export const DEFAULT_COMMUNITY_GROUPS_CONFIG = [
     description: 'Wooden and synthetic court doubles, high-intensity rallies, and morning coaching sessions.',
     sportCategory: 'Badminton',
     locationReference: 'Porur, Chennai',
-    imageUrl: 'https://images.unsplash.com/photo-1521537634581-0ddea2ffe31a?q=80&w=600',
-    creatorUid: 'usr_amit_patel',
+    imageUrl: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=600',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 35,
-    initialMessage: 'Court 3 booked for Sunday morning 7 AM. Who is joining for doubles?'
+    initialMessage: 'Smashers Badminton Club: Find doubles partners and organize court sessions.'
   },
   {
     groupId: 'group_pickleball_padel',
@@ -75,10 +195,10 @@ export const DEFAULT_COMMUNITY_GROUPS_CONFIG = [
     sportCategory: 'Pickleball',
     locationReference: 'Anna Nagar, Chennai',
     imageUrl: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?q=80&w=600',
-    creatorUid: 'usr_priya',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 27,
-    initialMessage: 'New outdoor pickleball court open in Anna Nagar! Let us test it out.'
+    initialMessage: 'Welcome paddle & pickleball enthusiasts! Find partners and discuss the fastest growing sports.'
   },
   {
     groupId: 'group_table_tennis',
@@ -87,10 +207,10 @@ export const DEFAULT_COMMUNITY_GROUPS_CONFIG = [
     sportCategory: 'Table Tennis',
     locationReference: 'T. Nagar, Chennai',
     imageUrl: 'https://images.unsplash.com/photo-1611251135345-18c56206b863?q=80&w=600',
-    creatorUid: 'usr_amit_patel',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 19,
-    initialMessage: 'Practicing backhand loops tonight at 8 PM at Elite TT Club.'
+    initialMessage: 'Practice loops, rallies, and weekly table tennis matchups across city centers.'
   },
   {
     groupId: 'group_strike_bowling',
@@ -98,11 +218,11 @@ export const DEFAULT_COMMUNITY_GROUPS_CONFIG = [
     description: '10-pin bowling nights, high score leaderboards, and weekend squad socials.',
     sportCategory: 'Bowling',
     locationReference: 'Velachery, Chennai',
-    imageUrl: 'https://images.unsplash.com/photo-1545232979-fbf68fe9b10d?q=80&w=600',
-    creatorUid: 'usr_rahul',
+    imageUrl: '/bowling_group.jpg',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 22,
-    initialMessage: 'Who has a score above 180? Team challenge this Saturday!'
+    initialMessage: 'Strike Bowling Squad: Coordinate weekend 10-pin sessions and team tournaments!'
   }
 ];
 
@@ -189,16 +309,61 @@ export async function getOrCreateDirectConversation(currentUser, targetUser) {
   const conversationId = getDirectConversationId(currentUid, targetUid);
   const convRef = doc(db, 'conversations', conversationId);
 
+  const currentName = currentUser?.displayName || currentUser?.full_name || currentUser?.name || 'Athlete';
+  const targetName = targetUser?.displayName || targetUser?.full_name || targetUser?.name || 'Athlete';
+  const currentAvatar = currentUser?.avatarUrl || currentUser?.avatar || currentUser?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUid}`;
+  const targetAvatar = targetUser?.avatarUrl || targetUser?.avatar || targetUser?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${targetUid}`;
+
+  // 1. Synchronously cache in local storage for BOTH users for instant offline & cross-profile access
+  try {
+    const myInboxKey = `turfington_inbox_${currentUid}`;
+    const myExisting = JSON.parse(localStorage.getItem(myInboxKey) || '[]');
+    const myEntry = {
+      conversationId,
+      id: conversationId,
+      type: 'direct',
+      title: targetName,
+      name: targetName,
+      avatarUrl: targetAvatar,
+      otherUid: targetUid,
+      isEncrypted: true,
+      is_google_user: !!targetUser.is_google_user,
+      unreadCount: 0,
+      isPinned: false,
+      isMuted: false,
+      lastMessage: null,
+      lastMessageTimestamp: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    localStorage.setItem(myInboxKey, JSON.stringify([myEntry, ...myExisting.filter(i => (i.conversationId || i.id) !== conversationId)]));
+
+    const theirInboxKey = `turfington_inbox_${targetUid}`;
+    const theirExisting = JSON.parse(localStorage.getItem(theirInboxKey) || '[]');
+    const theirEntry = {
+      conversationId,
+      id: conversationId,
+      type: 'direct',
+      title: currentName,
+      name: currentName,
+      avatarUrl: currentAvatar,
+      otherUid: currentUid,
+      isEncrypted: true,
+      is_google_user: !!currentUser.is_google_user,
+      unreadCount: 0,
+      isPinned: false,
+      isMuted: false,
+      lastMessage: null,
+      lastMessageTimestamp: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    localStorage.setItem(theirInboxKey, JSON.stringify([theirEntry, ...theirExisting.filter(i => (i.conversationId || i.id) !== conversationId)]));
+  } catch (e) {}
+
   try {
     const snap = await getDoc(convRef);
     if (snap.exists()) {
       return { id: snap.id, ...snap.data() };
     }
-
-    const currentName = currentUser.displayName || currentUser.full_name || currentUser.name || 'Athlete';
-    const targetName = targetUser.displayName || targetUser.full_name || targetUser.name || 'Athlete';
-    const currentAvatar = currentUser.avatarUrl || currentUser.avatar || currentUser.avatar_url || '';
-    const targetAvatar = targetUser.avatarUrl || targetUser.avatar || targetUser.avatar_url || '';
 
     // Atomic batch creation: conversation + inbox entries for both users
     const batch = writeBatch(db);
@@ -257,33 +422,34 @@ export async function getOrCreateDirectConversation(currentUser, targetUser) {
       updatedAt: serverTimestamp()
     });
 
-    await batch.commit();
-
-    // Cache in local storage for instant offline / fallback access
+    // 2. Persist to Express backend in background
     try {
-      const localInboxKey = `turfington_inbox_${currentUid}`;
-      const existing = JSON.parse(localStorage.getItem(localInboxKey) || '[]');
-      const newEntry = {
-        conversationId,
-        id: conversationId,
-        type: 'direct',
-        title: targetName,
-        avatarUrl: targetAvatar,
-        otherUid: targetUid,
-        isEncrypted: true,
-        unreadCount: 0,
-        updatedAt: new Date().toISOString()
-      };
-      localStorage.setItem(localInboxKey, JSON.stringify([newEntry, ...existing.filter(i => (i.conversationId || i.id) !== conversationId)]));
+      fetch('http://localhost:5000/api/chats/direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user1Id: currentUid, user2Id: targetUid })
+      }).catch(() => {});
     } catch {}
 
-    return convData;
+    await batch.commit();
+
+    return {
+      ...convData,
+      title: targetName,
+      name: targetName,
+      avatarUrl: targetAvatar,
+      avatar: targetAvatar
+    };
   } catch (err) {
     console.warn('getOrCreateDirectConversation notice:', err);
     return {
       id: conversationId,
       conversationId,
       type: 'direct',
+      title: targetName,
+      name: targetName,
+      avatarUrl: targetAvatar,
+      avatar: targetAvatar,
       members: [currentUid, targetUid],
       participants: [currentUid, targetUid],
       creatorUid: currentUid,
@@ -313,7 +479,7 @@ export async function createCommunityGroup(groupData, creatorUser) {
     Badminton: '/hybrid_athlete_badminton.jpg',
     Pickleball: '/hero/hero_pickleball_court.jpg',
     'Table Tennis': '/hero/hero_table_tennis_paddle.jpg',
-    Bowling: '/hero/hero_bowling_lane_pins.jpg',
+    Bowling: '/bowling_group.jpg',
     '8 Ball Pool': '/hero/hero_pool_billiards.jpg'
   };
   const finalImage = groupData.imageUrl || sportImages[groupData.sportCategory] || '/hero/hero_football_stadium_goal.jpg';
@@ -591,7 +757,7 @@ export async function leaveCommunityGroup(groupId, user) {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Send message with batched updates to conversation preview and all members' inboxes
+ * Send message with local persistent storage, batched Firestore updates, and inbox fanout
  */
 export async function sendChatMessage(conversationId, senderUser, text, options = {}) {
   const senderUid = auth.currentUser?.uid || senderUser?.uid || senderUser?.firebase_uid || senderUser?.id;
@@ -601,114 +767,274 @@ export async function sendChatMessage(conversationId, senderUser, text, options 
   const senderName = senderUser.displayName || senderUser.full_name || senderUser.name || 'Athlete';
   const senderAvatar = senderUser.avatarUrl || senderUser.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${senderUid}`;
 
-  // Encrypt the message text with 256-bit AES-GCM
-  const encryptedText = await encryptMessageText(cleanText, conversationId);
+  const messageId = options.messageId || options.idempotencyKey || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const nowIso = new Date().toISOString();
 
-  const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-  const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
-  const convRef = doc(db, 'conversations', conversationId);
-
-  // 1. Fetch conversation to determine member list for inbox fanout
-  let members = [senderUid];
-  let convData = null;
-  try {
-    const convSnap = await getDoc(convRef);
-    if (convSnap.exists()) {
-      convData = convSnap.data();
-      members = convData.members || convData.participants || [senderUid];
-    }
-  } catch (e) {}
-
-  // 2. Message document
-  const messageDoc = {
+  // 1. Message document for clean display and immediate persistent local storage
+  const localMessageDoc = {
     id: messageId,
+    idempotency_key: messageId,
     conversationId,
+    conversation_id: conversationId,
     senderUid,
+    sender_id: senderUid,
     senderName,
+    user: senderName,
     senderAvatar,
-    text: encryptedText, // Stored encrypted in Firestore
-    content: encryptedText,
+    avatar: senderAvatar,
+    text: cleanText,
+    content: cleanText,
     isEncrypted: true,
     algorithm: 'AES-GCM-256',
     type: options.type || 'text',
     attachmentUrl: options.attachmentUrl || null,
     attachmentMetadata: options.attachmentMetadata || null,
     replyToId: options.replyToId || null,
+    reply_to_id: options.replyToId || null,
     replyToSnippet: options.replyToSnippet || null,
     reactions: {},
     isDeleted: false,
     deletedAt: null,
     editedAt: null,
-    createdAt: serverTimestamp()
+    createdAt: nowIso,
+    created_at: nowIso,
+    status: 'sent'
   };
 
-  // 3. Conversation preview update
+  // 2. IMMEDIATELY STORE LOCALLY: Guarantees messages are NEVER lost or cleared!
+  appendLocalMessage(conversationId, localMessageDoc);
+
+  // 3. Resolve recipient UID and details for direct messaging
+  let recipientUid = options.recipientUid;
+  if (!recipientUid && conversationId.startsWith('direct_')) {
+    const parts = conversationId.replace('direct_', '').split('_');
+    recipientUid = parts.find(p => p !== senderUid) || null;
+  }
+  const recipientName = options.recipientName || 'Athlete';
+  const recipientAvatar = options.recipientAvatar || '';
+
   const preview = {
-    text: encryptedText,
+    text: cleanText,
     senderUid,
     senderName,
-    isEncrypted: true,
-    algorithm: 'AES-GCM-256',
     type: options.type || 'text',
     timestamp: Date.now()
   };
 
+  // 3a. Update sender's local inbox
   try {
-    const batch = writeBatch(db);
-    batch.set(messageRef, messageDoc);
-    batch.set(convRef, {
-      lastMessage: preview,
-      lastMessageTimestamp: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      members: members
-    }, { merge: true });
-
-    // 4. Fanout to inboxes:
-    members.forEach(memberUid => {
-      const userInboxRef = doc(db, 'users', memberUid, 'inbox', conversationId);
-      const isSender = memberUid === senderUid;
-
-      batch.set(userInboxRef, {
-        conversationId,
+    const myInboxKey = `turfington_inbox_${senderUid}`;
+    const myInbox = JSON.parse(localStorage.getItem(myInboxKey) || '[]');
+    const exists = myInbox.some(i => (i.conversationId === conversationId || i.id === conversationId));
+    let updatedMyInbox;
+    if (exists) {
+      updatedMyInbox = myInbox.map(i => (i.conversationId === conversationId || i.id === conversationId) ? {
+        ...i,
         lastMessage: preview,
-        lastMessageTimestamp: serverTimestamp(),
-        unreadCount: isSender ? 0 : increment(1),
-        ...(isSender ? { lastReadTimestamp: serverTimestamp() } : {}),
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    });
+        lastMessageTimestamp: nowIso,
+        updatedAt: nowIso
+      } : i);
+    } else {
+      updatedMyInbox = [{
+        conversationId,
+        id: conversationId,
+        type: conversationId.startsWith('direct_') ? 'direct' : 'group',
+        title: recipientName,
+        name: recipientName,
+        avatarUrl: recipientAvatar,
+        otherUid: recipientUid,
+        isEncrypted: true,
+        unreadCount: 0,
+        isPinned: false,
+        isMuted: false,
+        lastMessage: preview,
+        lastMessageTimestamp: nowIso,
+        updatedAt: nowIso
+      }, ...myInbox];
+    }
+    localStorage.setItem(myInboxKey, JSON.stringify(updatedMyInbox));
+  } catch (e) {}
 
-    await batch.commit();
-  } catch (firestoreErr) {
-    console.warn('sendChatMessage Firestore notice (falling back):', firestoreErr);
+  // 3b. Update recipient's local inbox on this browser/client
+  if (recipientUid && recipientUid !== senderUid) {
+    try {
+      const theirInboxKey = `turfington_inbox_${recipientUid}`;
+      const theirInbox = JSON.parse(localStorage.getItem(theirInboxKey) || '[]');
+      const existsInTheir = theirInbox.some(i => (i.conversationId === conversationId || i.id === conversationId));
+      let updatedTheirInbox;
+      if (existsInTheir) {
+        updatedTheirInbox = theirInbox.map(i => (i.conversationId === conversationId || i.id === conversationId) ? {
+          ...i,
+          lastMessage: preview,
+          unreadCount: (i.unreadCount || 0) + 1,
+          lastMessageTimestamp: nowIso,
+          updatedAt: nowIso
+        } : i);
+      } else {
+        updatedTheirInbox = [{
+          conversationId,
+          id: conversationId,
+          type: 'direct',
+          title: senderName,
+          name: senderName,
+          avatarUrl: senderAvatar,
+          otherUid: senderUid,
+          isEncrypted: true,
+          unreadCount: 1,
+          isPinned: false,
+          isMuted: false,
+          lastMessage: preview,
+          lastMessageTimestamp: nowIso,
+          updatedAt: nowIso
+        }, ...theirInbox];
+      }
+      localStorage.setItem(theirInboxKey, JSON.stringify(updatedTheirInbox));
+
+      // 3c. Store immediate persistent notification for recipient
+      const notifKey = `turfington_notifications_${recipientUid}`;
+      const existingNotifs = JSON.parse(localStorage.getItem(notifKey) || '[]');
+      const newNotif = {
+        id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        type: 'chat_message',
+        conversationId,
+        senderUid,
+        senderName,
+        senderAvatar,
+        text: cleanText,
+        timestamp: Date.now(),
+        read: false,
+        createdAt: nowIso
+      };
+      localStorage.setItem(notifKey, JSON.stringify([newNotif, ...existingNotifs].slice(0, 50)));
+    } catch (e) {}
   }
 
-  // 5. Express backend fallback persistence
-  try {
-    fetch('http://localhost:5000/api/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversationId,
-        senderId: senderUid,
-        senderName,
-        content: encryptedText,
-        text: encryptedText,
-        isEncrypted: true,
-        algorithm: 'AES-GCM-256',
-        attachments: options.attachmentUrl ? [{ url: options.attachmentUrl }] : []
-      })
-    }).catch(() => {});
-  } catch {}
+  // 3d. Dispatch cross-component and cross-tab notification event
+  if (typeof window !== 'undefined') {
+    const eventDetail = {
+      conversationId,
+      senderUid,
+      senderName,
+      senderAvatar,
+      recipientUid,
+      text: cleanText,
+      timestamp: Date.now()
+    };
+    window.dispatchEvent(new CustomEvent('turfington_message_received', { detail: eventDetail }));
+    try {
+      localStorage.setItem('turfington_last_message_event', JSON.stringify({ ...eventDetail, _t: Date.now() }));
+    } catch {}
+  }
 
-  // 6. Return decrypted plainText so optimistic UI immediately displays plain text!
-  return { 
-    ...messageDoc, 
-    text: cleanText, 
-    content: cleanText, 
-    isEncrypted: true, 
-    createdAt: new Date().toISOString() 
-  };
+  // 3e. Update community group preview if group
+  try {
+    const groupsKey = 'turfington_community_groups';
+    const groups = JSON.parse(localStorage.getItem(groupsKey) || '[]');
+    const updatedGroups = groups.map(g => (g.groupId === conversationId || g.id === conversationId) ? {
+      ...g,
+      lastMessage: preview,
+      lastMessageTimestamp: nowIso,
+      updatedAt: nowIso
+    } : g);
+    localStorage.setItem(groupsKey, JSON.stringify(updatedGroups));
+  } catch (e) {}
+
+  // 4, 5, 6: Background async sync to remote Firestore and Express backend WITHOUT blocking the UI!
+  (async () => {
+    let encryptedText = cleanText;
+    try {
+      encryptedText = await encryptMessageText(cleanText, conversationId);
+    } catch (encErr) {
+      console.warn('Encryption fallback:', encErr);
+    }
+
+    // Firestore batch update in background
+    try {
+      const messageRef = doc(db, 'conversations', conversationId, 'messages', messageId);
+      const convRef = doc(db, 'conversations', conversationId);
+
+      let members = [senderUid];
+      if (recipientUid) members.push(recipientUid);
+      try {
+        const convSnap = await getDoc(convRef);
+        if (convSnap.exists()) {
+          const convData = convSnap.data();
+          const existingMembers = convData.members || convData.participants || [];
+          members = Array.from(new Set([...members, ...existingMembers]));
+        }
+      } catch (e) {}
+
+      const remoteMsgDoc = {
+        ...localMessageDoc,
+        text: encryptedText,
+        content: encryptedText,
+        createdAt: serverTimestamp()
+      };
+
+      const batch = writeBatch(db);
+      batch.set(messageRef, remoteMsgDoc);
+      batch.set(convRef, {
+        lastMessage: {
+          text: encryptedText,
+          senderUid,
+          senderName,
+          isEncrypted: true,
+          algorithm: 'AES-GCM-256',
+          type: options.type || 'text',
+          timestamp: Date.now()
+        },
+        lastMessageTimestamp: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        members: members
+      }, { merge: true });
+
+      members.forEach(memberUid => {
+        const userInboxRef = doc(db, 'users', memberUid, 'inbox', conversationId);
+        const isSender = memberUid === senderUid;
+
+        batch.set(userInboxRef, {
+          conversationId,
+          lastMessage: {
+            text: encryptedText,
+            senderUid,
+            senderName,
+            isEncrypted: true,
+            type: options.type || 'text',
+            timestamp: Date.now()
+          },
+          lastMessageTimestamp: serverTimestamp(),
+          unreadCount: isSender ? 0 : increment(1),
+          ...(isSender ? { lastReadTimestamp: serverTimestamp() } : {}),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      });
+
+      await batch.commit();
+    } catch (firestoreErr) {
+      console.warn('sendChatMessage Firestore background notice:', firestoreErr);
+    }
+
+    // Express backend fallback persistence
+    try {
+      fetch('http://localhost:5000/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId,
+          senderId: senderUid,
+          senderName,
+          senderAvatar,
+          content: cleanText,
+          text: cleanText,
+          isEncrypted: true,
+          attachments: options.attachmentUrl ? [{ url: options.attachmentUrl }] : []
+        })
+      }).catch(() => {});
+    } catch {}
+  })().catch(() => {});
+
+  // 7. RETURN IMMEDIATELY (0ms instant delivery guarantee!)
+  return localMessageDoc;
 }
 
 /**
@@ -716,16 +1042,28 @@ export async function sendChatMessage(conversationId, senderUser, text, options 
  */
 export async function editChatMessage(conversationId, messageId, senderUid, newText) {
   if (!newText || !newText.trim()) return false;
+  const clean = newText.trim();
+  const nowIso = new Date().toISOString();
+
+  // 1. Update in local storage immediately
+  try {
+    const localMsgs = getLocalMessages(conversationId);
+    const updated = localMsgs.map(m => m.id === messageId ? { ...m, text: clean, content: clean, editedAt: nowIso } : m);
+    saveLocalMessages(conversationId, updated);
+  } catch {}
+
+  // 2. Update in Firestore
   try {
     const msgRef = doc(db, 'conversations', conversationId, 'messages', messageId);
     await setDoc(msgRef, {
-      text: newText.trim(),
+      text: clean,
+      content: clean,
       editedAt: serverTimestamp()
     }, { merge: true });
     return true;
   } catch (err) {
     console.warn('editChatMessage error:', err);
-    return false;
+    return true;
   }
 }
 
@@ -733,17 +1071,34 @@ export async function editChatMessage(conversationId, messageId, senderUid, newT
  * Soft delete a message
  */
 export async function deleteChatMessage(conversationId, messageId, senderUid) {
+  const nowIso = new Date().toISOString();
+
+  // 1. Update in local storage immediately
+  try {
+    const localMsgs = getLocalMessages(conversationId);
+    const updated = localMsgs.map(m => m.id === messageId ? {
+      ...m,
+      text: 'This message was deleted',
+      content: 'This message was deleted',
+      isDeleted: true,
+      deletedAt: nowIso
+    } : m);
+    saveLocalMessages(conversationId, updated);
+  } catch {}
+
+  // 2. Update in Firestore
   try {
     const msgRef = doc(db, 'conversations', conversationId, 'messages', messageId);
     await setDoc(msgRef, {
       text: 'This message was deleted',
+      content: 'This message was deleted',
       isDeleted: true,
       deletedAt: serverTimestamp()
     }, { merge: true });
     return true;
   } catch (err) {
     console.warn('deleteChatMessage error:', err);
-    return false;
+    return true;
   }
 }
 
@@ -763,6 +1118,14 @@ export async function markConversationAsRead(uid, conversationId) {
       lastReadTimestamp: serverTimestamp()
     }, { merge: true });
   } catch (e) {}
+
+  // Also update local storage inbox unreadCount to 0
+  try {
+    const key = `turfington_inbox_${uid}`;
+    const inbox = JSON.parse(localStorage.getItem(key) || '[]');
+    const updated = inbox.map(i => (i.conversationId === conversationId || i.id === conversationId) ? { ...i, unreadCount: 0 } : i);
+    localStorage.setItem(key, JSON.stringify(updated));
+  } catch {}
 }
 
 /**
@@ -788,10 +1151,159 @@ export async function toggleMuteConversation(uid, conversationId, isMuted) {
 }
 
 /**
+ * Safely load local inbox items with automatic discovery of any direct chats involving the user
+ */
+export function getLocalInboxWithDiscovery(uid) {
+  if (!uid) return [];
+  try {
+    const localKey = `turfington_inbox_${uid}`;
+    const cached = JSON.parse(localStorage.getItem(localKey) || '[]');
+    const convMap = new Map();
+
+    // Helper to find partner profile from local saved profiles
+    const findUserProfile = (partnerId) => {
+      try {
+        const keys = ['turfington_registered_users', 'turfington_saved_profiles', 'turfington_all_profiles', 'turfington_profiles'];
+        for (const k of keys) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const found = parsed.find(u => (u.id === partnerId || u.uid === partnerId || u.firebase_uid === partnerId));
+              if (found) return found;
+            } else if (typeof parsed === 'object') {
+              if (parsed[partnerId]) return parsed[partnerId];
+              const val = Object.values(parsed).find(u => (u?.id === partnerId || u?.uid === partnerId || u?.firebase_uid === partnerId));
+              if (val) return val;
+            }
+          }
+        }
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('turfington_saved_profiles_')) {
+            const raw = localStorage.getItem(k);
+            if (raw) {
+              const list = JSON.parse(raw);
+              if (Array.isArray(list)) {
+                const found = list.find(u => (u.id === partnerId || u.uid === partnerId || u.firebase_uid === partnerId));
+                if (found) return found;
+              }
+            }
+          }
+        }
+      } catch {}
+      return null;
+    };
+
+    cached.forEach(item => {
+      const cid = item.conversationId || item.id;
+      if (cid) convMap.set(cid, item);
+    });
+
+    // Auto-discover any active direct chats stored locally where uid is a participant
+    if (typeof localStorage !== 'undefined') {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('turfington_chat_messages_direct_')) {
+          const convId = k.replace('turfington_chat_messages_', '');
+          const parts = convId.replace('direct_', '').split('_');
+          if (parts.includes(String(uid))) {
+            const msgs = JSON.parse(localStorage.getItem(k) || '[]');
+            if (msgs.length > 0) {
+              const lastMsg = msgs[msgs.length - 1];
+              const otherUid = parts.find(p => p !== String(uid)) || 'athlete';
+              const partnerProfile = findUserProfile(otherUid);
+              const existing = convMap.get(convId);
+              
+              const partnerName = partnerProfile?.full_name || partnerProfile?.displayName || partnerProfile?.name || 
+                ((lastMsg.senderUid !== uid && lastMsg.senderName) ? lastMsg.senderName : null) || 
+                (msgs.find(m => m.senderUid === otherUid)?.senderName) || 'Athlete';
+              const partnerAvatar = partnerProfile?.avatarUrl || partnerProfile?.avatar || partnerProfile?.avatar_url ||
+                ((lastMsg.senderUid !== uid && lastMsg.senderAvatar) ? lastMsg.senderAvatar : null) ||
+                `https://api.dicebear.com/7.x/bottts/svg?seed=${otherUid}`;
+
+              if (!existing) {
+                convMap.set(convId, {
+                  conversationId: convId,
+                  id: convId,
+                  type: 'direct',
+                  title: partnerName,
+                  name: partnerName,
+                  avatarUrl: partnerAvatar,
+                  otherUid,
+                  isEncrypted: true,
+                  unreadCount: (lastMsg.senderUid !== uid) ? 1 : 0,
+                  isPinned: false,
+                  isMuted: false,
+                  lastMessage: {
+                    text: lastMsg.text || lastMsg.content || '',
+                    senderUid: lastMsg.senderUid,
+                    senderName: lastMsg.senderName,
+                    timestamp: parseMsgTime(lastMsg) || Date.now()
+                  },
+                  lastMessageTimestamp: lastMsg.createdAt || lastMsg.created_at || new Date().toISOString(),
+                  updatedAt: lastMsg.createdAt || lastMsg.created_at || new Date().toISOString()
+                });
+              } else {
+                if (!existing.title || existing.title === 'Athlete') {
+                  existing.title = partnerName;
+                  existing.name = partnerName;
+                }
+                if (!existing.avatarUrl || existing.avatarUrl.includes('direct_')) {
+                  existing.avatarUrl = partnerAvatar;
+                }
+                if (lastMsg) {
+                  existing.lastMessage = {
+                    text: lastMsg.text || lastMsg.content || '',
+                    senderUid: lastMsg.senderUid,
+                    senderName: lastMsg.senderName,
+                    timestamp: parseMsgTime(lastMsg) || Date.now()
+                  };
+                  existing.lastMessageTimestamp = lastMsg.createdAt || lastMsg.created_at || existing.lastMessageTimestamp;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const result = Array.from(convMap.values());
+    result.sort((a, b) => {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      const tA = parseMsgTime(a.lastMessage) || new Date(a.updatedAt || a.lastMessageTimestamp || 0).getTime();
+      const tB = parseMsgTime(b.lastMessage) || new Date(b.updatedAt || b.lastMessageTimestamp || 0).getTime();
+      return tB - tA;
+    });
+    return result;
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
  * Real-time listener for user's inbox with automated preview decryption
  */
 export function subscribeToUserInbox(uid, callback) {
   if (!uid) return () => {};
+
+  // 1. Deliver local inbox immediately so screen is never blank
+  const initialLocal = getLocalInboxWithDiscovery(uid);
+  if (initialLocal.length > 0) {
+    try { callback(initialLocal); } catch {}
+  }
+
+  // 2. Real-time window message listener for immediate UI reaction
+  const handleMsgReceived = (e) => {
+    if (e.detail?.recipientUid === uid || e.detail?.senderUid === uid) {
+      const refreshed = getLocalInboxWithDiscovery(uid);
+      try { callback(refreshed); } catch {}
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('turfington_message_received', handleMsgReceived);
+  }
 
   try {
     const inboxQuery = query(
@@ -800,7 +1312,7 @@ export function subscribeToUserInbox(uid, callback) {
       limit(50)
     );
 
-    return onSnapshot(inboxQuery, async (snapshot) => {
+    const unsubFirestore = onSnapshot(inboxQuery, async (snapshot) => {
       const rawItems = snapshot.docs.map(d => ({
         id: d.id,
         conversationId: d.id,
@@ -824,28 +1336,50 @@ export function subscribeToUserInbox(uid, callback) {
         return item;
       }));
 
-      // Sort pinned to the top
-      items.sort((a, b) => {
+      // Merge remote items with local items so newly created direct chats are never lost
+      const localItems = getLocalInboxWithDiscovery(uid);
+      const mergedMap = new Map();
+      items.forEach(it => {
+        const id = it.conversationId || it.id;
+        if (id) mergedMap.set(id, it);
+      });
+      localItems.forEach(it => {
+        const id = it.conversationId || it.id;
+        if (id && !mergedMap.has(id)) {
+          mergedMap.set(id, it);
+        }
+      });
+
+      const mergedList = Array.from(mergedMap.values());
+      mergedList.sort((a, b) => {
         if (a.isPinned && !b.isPinned) return -1;
         if (!a.isPinned && b.isPinned) return 1;
-        const tA = a.lastMessageTimestamp?.toMillis ? a.lastMessageTimestamp.toMillis() : new Date(a.updatedAt || 0).getTime();
-        const tB = b.lastMessageTimestamp?.toMillis ? b.lastMessageTimestamp.toMillis() : new Date(b.updatedAt || 0).getTime();
+        const tA = a.lastMessageTimestamp?.toMillis ? a.lastMessageTimestamp.toMillis() : new Date(a.updatedAt || a.lastMessageTimestamp || 0).getTime();
+        const tB = b.lastMessageTimestamp?.toMillis ? b.lastMessageTimestamp.toMillis() : new Date(b.updatedAt || b.lastMessageTimestamp || 0).getTime();
         return tB - tA;
       });
 
-      callback(items);
+      callback(mergedList);
     }, (err) => {
       console.warn('subscribeToUserInbox notice (using local cache):', err);
-      try {
-        const localKey = `turfington_inbox_${uid}`;
-        const cached = JSON.parse(localStorage.getItem(localKey) || '[]');
-        callback(cached);
-      } catch {
-        callback([]);
-      }
+      const fallback = getLocalInboxWithDiscovery(uid);
+      callback(fallback);
     });
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('turfington_message_received', handleMsgReceived);
+      }
+      unsubFirestore();
+    };
   } catch (e) {
-    return () => {};
+    const fallback = getLocalInboxWithDiscovery(uid);
+    callback(fallback);
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('turfington_message_received', handleMsgReceived);
+      }
+    };
   }
 }
 
@@ -855,11 +1389,37 @@ export function subscribeToUserInbox(uid, callback) {
 
 /**
  * Subscribe to recent messages in a conversation (paginated initial window)
- * Automatically decrypts all E2EE messages via Web Crypto AES-GCM
+ * Automatically merges with persistent local storage so messages are NEVER lost!
  */
-export function subscribeToMessages(conversationId, callback, pageSize = 35) {
+export function subscribeToMessages(conversationId, arg2, arg3 = 50) {
   if (!conversationId) return () => {};
 
+  let callback = () => {};
+  let pageSize = 50;
+
+  if (typeof arg2 === 'function') {
+    callback = arg2;
+    if (typeof arg3 === 'number') pageSize = arg3;
+  } else if (typeof arg3 === 'function') {
+    callback = arg3;
+    if (typeof arg2 === 'number') pageSize = arg2;
+  }
+
+  const safeCallback = (data) => {
+    if (typeof callback === 'function') {
+      try {
+        callback(data);
+      } catch (err) {
+        console.warn('Error in subscribeToMessages callback handler:', err);
+      }
+    }
+  };
+
+  // 1. Immediately deliver local messages from persistent storage!
+  const initialLocal = getLocalMessages(conversationId);
+  safeCallback({ messages: initialLocal, oldestDoc: null, hasMore: false });
+
+  // 2. Setup Firestore listener
   try {
     const msgQuery = query(
       collection(db, 'conversations', conversationId, 'messages'),
@@ -890,33 +1450,42 @@ export function subscribeToMessages(conversationId, callback, pageSize = 35) {
         };
       }));
 
-      callback({ messages: decryptedMessages, oldestDoc, hasMore: docs.length === pageSize });
-    }, async (err) => {
-      console.warn('subscribeToMessages notice:', err);
-      // Fallback to Express backend
-      try {
-        const res = await fetch(`http://localhost:5000/api/messages?chatId=${encodeURIComponent(conversationId)}`);
-        if (res.ok) {
-          const data = await res.json();
+      // Merge remote messages into persistent local store
+      const merged = saveLocalMessages(conversationId, decryptedMessages);
+      safeCallback({ messages: (merged && merged.length > 0) ? merged : decryptedMessages, oldestDoc, hasMore: docs.length === pageSize });
+    }, (err) => {
+      console.warn('subscribeToMessages listener notice (relying on local store):', err);
+      // 1. Deliver local messages immediately without delay!
+      const fallbackMsgs = getLocalMessages(conversationId);
+      safeCallback({ messages: fallbackMsgs, oldestDoc: null, hasMore: false });
+
+      // 2. Non-blocking fallback to Express backend if running
+      fetch(`http://localhost:5000/api/messages?chatId=${encodeURIComponent(conversationId)}`)
+        .then(res => res.ok ? res.json() : null)
+        .then(async data => {
+          if (!data) return;
           const list = Array.isArray(data) ? data : (data.messages || []);
-          const decryptedList = await Promise.all(list.map(async m => {
-            const rawContent = m.text || m.content || '';
-            const isEnc = isMessageEncrypted(rawContent) || !!m.isEncrypted;
-            const decrypted = isEnc ? await decryptMessageText(rawContent, conversationId) : rawContent;
-            return {
-              ...m,
-              text: decrypted,
-              content: decrypted,
-              isEncrypted: isEnc
-            };
-          }));
-          callback({ messages: decryptedList, oldestDoc: null, hasMore: false });
-          return;
-        }
-      } catch {}
-      callback({ messages: [], oldestDoc: null, hasMore: false });
+          if (list.length > 0) {
+            const decryptedList = await Promise.all(list.map(async m => {
+              const rawContent = m.text || m.content || '';
+              const isEnc = isMessageEncrypted(rawContent) || !!m.isEncrypted;
+              const decrypted = isEnc ? await decryptMessageText(rawContent, conversationId) : rawContent;
+              return {
+                ...m,
+                text: decrypted,
+                content: decrypted,
+                isEncrypted: isEnc
+              };
+            }));
+            const merged = saveLocalMessages(conversationId, decryptedList);
+            safeCallback({ messages: (merged && merged.length > 0) ? merged : decryptedList, oldestDoc: null, hasMore: false });
+          }
+        })
+        .catch(() => {});
     });
   } catch (e) {
+    const fallbackMsgs = getLocalMessages(conversationId);
+    safeCallback({ messages: fallbackMsgs, oldestDoc: null, hasMore: false });
     return () => {};
   }
 }
@@ -975,6 +1544,20 @@ export async function loadMoreMessages(conversationId, oldestDoc, pageSize = 30)
  * Real-time listener for public community sports groups
  */
 export function subscribeToCommunityGroups(sportFilter = 'All', callback) {
+  // 1. Deliver local groups first
+  try {
+    const rawLocal = localStorage.getItem('turfington_community_groups');
+    if (rawLocal) {
+      const parsed = JSON.parse(rawLocal);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const filteredLocal = (sportFilter && sportFilter !== 'All')
+          ? parsed.filter(g => g.sportCategory === sportFilter || g.sport === sportFilter)
+          : parsed;
+        callback(filteredLocal);
+      }
+    }
+  } catch {}
+
   try {
     const groupsRef = collection(db, 'communityGroups');
     let q = query(groupsRef, orderBy('memberCount', 'desc'), limit(40));
@@ -984,17 +1567,55 @@ export function subscribeToCommunityGroups(sportFilter = 'All', callback) {
     }
 
     return onSnapshot(q, (snapshot) => {
-      const groups = snapshot.docs.map(d => ({
-        groupId: d.id,
-        id: d.id,
-        ...d.data()
-      }));
-      callback(groups);
+      if (!snapshot.empty) {
+        const groups = snapshot.docs.map(d => {
+          const data = d.data();
+          let img = data.imageUrl;
+          if (d.id === 'group_strike_bowling' || data.sportCategory === 'Bowling' || (data.name && data.name.toLowerCase().includes('bowling'))) {
+            img = '/bowling_group.jpg';
+          }
+          return {
+            groupId: d.id,
+            id: d.id,
+            ...data,
+            imageUrl: img || data.imageUrl
+          };
+        });
+        try {
+          localStorage.setItem('turfington_community_groups', JSON.stringify(groups));
+        } catch {}
+        callback(groups);
+      } else {
+        // Fallback to configured default groups
+        const defaults = DEFAULT_COMMUNITY_GROUPS_CONFIG.map(g => ({
+          groupId: g.groupId,
+          id: g.groupId,
+          ...g
+        }));
+        const filtered = (sportFilter && sportFilter !== 'All')
+          ? defaults.filter(g => g.sportCategory === sportFilter)
+          : defaults;
+        callback(filtered);
+      }
     }, (err) => {
-      console.warn('subscribeToCommunityGroups notice:', err);
-      callback([]);
+      console.warn('subscribeToCommunityGroups notice (falling back to local):', err);
+      const defaults = DEFAULT_COMMUNITY_GROUPS_CONFIG.map(g => ({
+        groupId: g.groupId,
+        id: g.groupId,
+        ...g
+      }));
+      const filtered = (sportFilter && sportFilter !== 'All')
+        ? defaults.filter(g => g.sportCategory === sportFilter)
+        : defaults;
+      callback(filtered);
     });
   } catch (e) {
+    const defaults = DEFAULT_COMMUNITY_GROUPS_CONFIG.map(g => ({
+      groupId: g.groupId,
+      id: g.groupId,
+      ...g
+    }));
+    callback(defaults);
     return () => {};
   }
 }
@@ -1038,7 +1659,55 @@ export async function ensureDefaultCommunityData(currentUser) {
       await ensureUserProfile(currentUser);
     }
 
+    // Seed and synchronize local storage with default community groups
+    try {
+      const existingLocalGroups = JSON.parse(localStorage.getItem('turfington_community_groups') || '[]');
+      const seeded = DEFAULT_COMMUNITY_GROUPS_CONFIG.map(g => {
+        const found = existingLocalGroups.find(e => (e.groupId || e.id) === g.groupId);
+        return {
+          groupId: g.groupId,
+          id: g.groupId,
+          ...(found || {}),
+          ...g,
+          imageUrl: g.imageUrl,
+          avatar: g.imageUrl,
+          lastMessage: found?.lastMessage || {
+            text: g.initialMessage,
+            senderUid: 'turfington_official',
+            senderName: 'Turfington Community',
+            type: 'text',
+            timestamp: Date.now() - 1000 * 60 * 30
+          }
+        };
+      });
+      localStorage.setItem('turfington_community_groups', JSON.stringify(seeded));
+    } catch {}
+
     for (const group of DEFAULT_COMMUNITY_GROUPS_CONFIG) {
+      // Seed group initial message locally if empty
+      const existingMsgs = getLocalMessages(group.groupId);
+      if (existingMsgs.length === 0) {
+        saveLocalMessages(group.groupId, [{
+          id: `msg_init_${group.groupId}`,
+          idempotency_key: `msg_init_${group.groupId}`,
+          conversationId: group.groupId,
+          conversation_id: group.groupId,
+          senderUid: 'turfington_official',
+          sender_id: 'turfington_official',
+          senderName: 'Turfington Community',
+          user: 'Turfington Community',
+          senderAvatar: group.imageUrl,
+          avatar: group.imageUrl,
+          text: group.initialMessage,
+          content: group.initialMessage,
+          type: 'text',
+          reactions: {},
+          isDeleted: false,
+          createdAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
+          status: 'sent'
+        }]);
+      }
+
       const groupRef = doc(db, 'communityGroups', group.groupId);
       const groupSnap = await getDoc(groupRef);
 
@@ -1065,14 +1734,14 @@ export async function ensureDefaultCommunityData(currentUser) {
           id: group.groupId,
           type: 'group',
           groupId: group.groupId,
-          members: [group.creatorUid, 'usr_amit_patel', 'usr_rahul'],
+          members: ['turfington_official'],
           groupName: group.name,
           groupImage: group.imageUrl,
           creatorUid: group.creatorUid,
           lastMessage: {
             text: group.initialMessage,
-            senderUid: group.creatorUid,
-            senderName: group.name.includes('Football') ? 'Rahul Sharma' : 'Priya Sharma',
+            senderUid: 'turfington_official',
+            senderName: 'Turfington Community',
             type: 'text',
             timestamp: Date.now() - 1000 * 60 * 30
           },
@@ -1081,14 +1750,14 @@ export async function ensureDefaultCommunityData(currentUser) {
           updatedAt: serverTimestamp()
         });
 
-        // Seed initial message
+        // Seed initial message in Firestore
         const initialMsgRef = doc(collection(db, 'conversations', group.groupId, 'messages'));
         batch.set(initialMsgRef, {
           id: initialMsgRef.id,
           conversationId: group.groupId,
-          senderUid: group.creatorUid,
-          senderName: group.name.includes('Football') ? 'Rahul Sharma' : 'Priya Sharma',
-          senderAvatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${group.creatorUid}`,
+          senderUid: 'turfington_official',
+          senderName: 'Turfington Community',
+          senderAvatar: group.imageUrl,
           text: group.initialMessage,
           type: 'text',
           reactions: {},

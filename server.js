@@ -37,50 +37,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 // Initial Database Seed Data
 const INITIAL_DATA = {
-  users: [
-    {
-      id: 'usr_rahul',
-      name: 'Rahul Sharma',
-      email: 'rahul.sharma@gmail.com',
-      phone: '+91 9876543210',
-      role: 'player',
-      avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Rahul',
-      address: '100 Feet Road, Indiranagar',
-      city: 'Bengaluru',
-      pincode: '560038',
-      lat: 12.9784,
-      lng: 77.6408,
-      socials: {
-        instagram: 'rahul_sharma_turf',
-        facebook: 'rahul.sharma.official',
-        twitter: 'rahul_athlete',
-        linkedin: 'rahul-sharma-sports',
-        youtube: '@rahulsports'
-      },
-      created_at: new Date().toISOString()
-    },
-    {
-      id: 'usr_priya',
-      name: 'Priya Sharma',
-      email: 'priya.sharma@gmail.com',
-      phone: '+91 9812345678',
-      role: 'owner',
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Priya',
-      address: 'Koramangala 4th Block',
-      city: 'Bengaluru',
-      pincode: '560034',
-      lat: 12.9352,
-      lng: 77.6245,
-      socials: {
-        instagram: 'vanguard_turf_official',
-        facebook: 'vanguard.sports.arena',
-        twitter: 'vanguard_turf',
-        linkedin: 'priya-sharma-turfs',
-        youtube: '@vanguardturf'
-      },
-      created_at: new Date().toISOString()
-    }
-  ],
+  users: [],
   otps: [],
   venues: [
     {
@@ -1023,19 +980,56 @@ app.post('/api/posts/:id/like', (req, res) => {
 });
 
 // 9. Users & Player Search API
+const SERVER_NPC_TEST_USERS = new Set([
+  'usr_rahul',
+  'usr_priya',
+  'usr_vikram',
+  'usr_sneha',
+  'usr_karthik',
+  'usr_amit_patel',
+  'usr_7332uo2et',
+  'usr_txb1xcvak',
+  'jbTOjOIRIdS8Le6pt79ZxX9AWT53',
+  'owner123@gmail.cpm'
+]);
+
 app.get('/api/users', (req, res) => {
   const { query, currentUserId } = req.query;
   const db = readDB();
-  let users = db.users || [];
+  let users = (db.users || []).filter(u => {
+    if (!u || !u.id) return false;
+    if (SERVER_NPC_TEST_USERS.has(u.id)) return false;
+
+    const email = (u.email || '').toLowerCase().trim();
+    if (email === 'owner123@gmail.cpm') return false;
+
+    // Strict requirement: Only accounts created by Google or real active users with valid email
+    const isGoogle = !!(
+      u.auth_provider === 'google' ||
+      u.is_google_user ||
+      email.endsWith('@gmail.com') ||
+      (u.avatar && u.avatar.includes('googleusercontent.com'))
+    );
+    const isActive = !!(u.is_active_user || (email && email.includes('@')));
+    if (!isGoogle && !isActive) return false;
+    if (!email && !isGoogle) return false;
+
+    return true;
+  });
 
   if (query) {
-    const q = query.toLowerCase();
+    const q = query.toLowerCase().trim();
+    const cleanQ = q.replace(/^@/, '');
     users = users.filter(u => 
-      u.name?.toLowerCase().includes(q) ||
-      u.phone?.toLowerCase().includes(q) ||
-      u.email?.toLowerCase().includes(q) ||
-      u.city?.toLowerCase().includes(q) ||
-      u.address?.toLowerCase().includes(q)
+      u.name?.toLowerCase().includes(cleanQ) ||
+      u.full_name?.toLowerCase().includes(cleanQ) ||
+      u.username?.toLowerCase().includes(cleanQ) ||
+      u.handle?.toLowerCase().includes(q) ||
+      u.player_id?.toLowerCase().includes(q) ||
+      u.phone?.toLowerCase().includes(cleanQ) ||
+      u.email?.toLowerCase().includes(cleanQ) ||
+      u.city?.toLowerCase().includes(cleanQ) ||
+      u.address?.toLowerCase().includes(cleanQ)
     );
   }
 
@@ -1321,11 +1315,11 @@ const DEFAULT_COMMUNITY_GROUPS = [
     description: 'Weekly 7v7 turf matches, tactical meetups, and friendly amateur leagues across Chennai.',
     sportCategory: 'Football',
     locationReference: 'Chennai, Tamil Nadu',
-    imageUrl: '/hero/hero_football_stadium_goal.jpg',
-    creatorUid: 'usr_amit_patel',
+    imageUrl: '/football_group.jpg',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 48,
-    members: ['usr_amit_patel', 'usr_rahul'],
+    members: ['turfington_official'],
     created_at: new Date(Date.now() - 86400000 * 7).toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -1336,11 +1330,11 @@ const DEFAULT_COMMUNITY_GROUPS = [
     description: 'Fast-paced box cricket tournaments, night matches, and weekend nets. Batsmen & bowlers welcome!',
     sportCategory: 'Cricket',
     locationReference: 'Poonamallee, Chennai',
-    imageUrl: '/hero/hero_cricket_batsman.jpg',
-    creatorUid: 'usr_rahul',
+    imageUrl: '/cricket_group.jpg',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 62,
-    members: ['usr_rahul', 'usr_amit_patel'],
+    members: ['turfington_official'],
     created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -1351,11 +1345,11 @@ const DEFAULT_COMMUNITY_GROUPS = [
     description: 'Wooden and synthetic court doubles, high-intensity rallies, and morning coaching sessions.',
     sportCategory: 'Badminton',
     locationReference: 'Porur, Chennai',
-    imageUrl: '/hybrid_athlete_badminton.jpg',
-    creatorUid: 'usr_priya',
+    imageUrl: '/badminton_group.jpg',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 39,
-    members: ['usr_priya', 'usr_amit_patel'],
+    members: ['turfington_official'],
     created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -1367,10 +1361,10 @@ const DEFAULT_COMMUNITY_GROUPS = [
     sportCategory: 'Pickleball',
     locationReference: 'Anna Nagar, Chennai',
     imageUrl: '/hero/hero_pickleball_court.jpg',
-    creatorUid: 'usr_amit_patel',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 27,
-    members: ['usr_amit_patel'],
+    members: ['turfington_official'],
     created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -1382,10 +1376,10 @@ const DEFAULT_COMMUNITY_GROUPS = [
     sportCategory: 'Table Tennis',
     locationReference: 'Mylapore, Chennai',
     imageUrl: '/hero/hero_table_tennis_paddle.jpg',
-    creatorUid: 'usr_rahul',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 34,
-    members: ['usr_rahul'],
+    members: ['turfington_official'],
     created_at: new Date(Date.now() - 86400000).toISOString(),
     updated_at: new Date().toISOString()
   },
@@ -1397,10 +1391,10 @@ const DEFAULT_COMMUNITY_GROUPS = [
     sportCategory: 'Bowling',
     locationReference: 'Velachery, Chennai',
     imageUrl: '/hero/hero_bowling_lane_pins.jpg',
-    creatorUid: 'usr_priya',
+    creatorUid: 'turfington_official',
     visibility: 'public',
     memberCount: 21,
-    members: ['usr_priya'],
+    members: ['turfington_official'],
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   }
@@ -1593,41 +1587,51 @@ app.get('/api/messages', (req, res) => {
 });
 
 app.post('/api/messages', (req, res) => {
-  const { chatId, conversationId, senderId, user, avatar, text, replyToId, reply_to_id, attachments, idempotencyKey, idempotency_key } = req.body;
+  const { chatId, conversationId, senderId, senderUid, user, senderName, avatar, senderAvatar, text, content, replyToId, reply_to_id, attachments, idempotencyKey, idempotency_key } = req.body;
   const targetChatId = chatId || conversationId;
   const key = idempotencyKey || idempotency_key;
   const rId = replyToId || reply_to_id;
+  const msgText = (text || content || '').trim();
+  const actualSenderId = senderId || senderUid || 'usr_me';
+  const actualUser = user || senderName || 'Athlete';
+  const actualAvatar = avatar || senderAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${actualSenderId}`;
 
-  if (!targetChatId || !text) {
+  if (!targetChatId || !msgText) {
     return res.status(400).json({ success: false, error: 'chatId/conversationId and text required' });
   }
 
   const db = readDB();
   db.messages = db.messages || [];
   db.chats = db.chats || [];
+  db.community_groups = db.community_groups || [];
 
   // Check idempotency
   if (key) {
-    const dup = db.messages.find(m => m.idempotency_key === key || m.idempotencyKey === key);
+    const dup = db.messages.find(m => m.idempotency_key === key || m.idempotencyKey === key || m.id === key);
     if (dup) {
       return res.json({ success: true, message: dup, duplicate: true });
     }
   }
 
   const newMsg = {
-    id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+    id: key || ('msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)),
     chatId: targetChatId,
     conversation_id: targetChatId,
-    sender_id: senderId || 'usr_me',
-    user: user || 'Athlete',
-    avatar: avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=User',
-    text,
-    content: text,
+    conversationId: targetChatId,
+    sender_id: actualSenderId,
+    senderId: actualSenderId,
+    senderUid: actualSenderId,
+    user: actualUser,
+    senderName: actualUser,
+    avatar: actualAvatar,
+    senderAvatar: actualAvatar,
+    text: msgText,
+    content: msgText,
     reply_to_id: rId || null,
     replyToId: rId || null,
     attachments: attachments || [],
     reactions: [],
-    reads: [senderId || 'usr_me'],
+    reads: [actualSenderId],
     status: 'sent',
     idempotency_key: key || null,
     idempotencyKey: key || null,
@@ -1638,16 +1642,30 @@ app.post('/api/messages', (req, res) => {
   db.messages.push(newMsg);
 
   // Update chat lastMsg summary
-  const chatObj = db.chats.find(c => c.id === targetChatId);
+  const chatObj = db.chats.find(c => c.id === targetChatId || c.groupId === targetChatId);
   if (chatObj) {
     chatObj.lastMsg = {
-      text,
+      text: msgText,
       time: newMsg.time,
       user: newMsg.user,
       self: false,
       read: false
     };
     chatObj.updated_at = newMsg.created_at;
+  }
+
+  // Update community_groups lastMessage preview
+  const groupObj = db.community_groups.find(g => (g.groupId || g.id) === targetChatId);
+  if (groupObj) {
+    groupObj.lastMessage = {
+      text: msgText,
+      senderUid: actualSenderId,
+      senderName: actualUser,
+      type: attachments && attachments.length > 0 ? 'image' : 'text',
+      timestamp: Date.now()
+    };
+    groupObj.lastMessageTimestamp = newMsg.created_at;
+    groupObj.updated_at = newMsg.created_at;
   }
 
   writeDB(db);

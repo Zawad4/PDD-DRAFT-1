@@ -8,4 +8,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  server: {
+    watch: {
+      ignored: ['**/turfington_db.json', '**/turfington_db*.json', '**/server.js', '**/*.json']
+    }
+  }
 })

@@ -1264,51 +1264,35 @@ function VenueCard({ venue, onToggleActive, onUpdateSlot, onDelete, venueOffers,
 
 /* ─── Main Page ──────────────────────────────────────── */
 export default function VenueManager({ user, venueOffers, setVenueOffers }) {
-  const [venues, setVenues] = useState(() =>
-    INITIAL_VENUES.map(v => ({ ...v, slots: generateSlots() }))
-  );
+  const [venues, setVenues] = useState([]);
   const [addOpen, setAddOpen] = useState(false);
 
   // Incoming Player Booking Requests
-  const [ownerBookings, setOwnerBookings] = useState([
-    {
-      id: 'bk_req_101',
-      player_name: 'Rahul Sharma',
-      player_phone: '+91 98765 43210',
-      title: 'Vanguard Sports Arena',
-      sport: 'Football',
-      date: 'Tomorrow, 27 May',
-      time: '06:00 PM – 07:00 PM',
-      price: '₹3,750',
-      status: 'PENDING OWNER APPROVAL',
-      rejection_reason: null,
-      created_at: new Date().toISOString()
-    },
-    {
-      id: 'bk_req_102',
-      player_name: 'Pooja Reddy',
-      player_phone: '+91 98400 12345',
-      title: 'Smash Club Badminton',
-      sport: 'Badminton',
-      date: 'Wed, 28 May',
-      time: '07:00 AM – 08:00 AM',
-      price: '₹2,500',
-      status: 'PENDING OWNER APPROVAL',
-      rejection_reason: null,
-      created_at: new Date().toISOString()
-    }
-  ]);
+  const [ownerBookings, setOwnerBookings] = useState([]);
   const [rejectingTarget, setRejectingTarget] = useState(null);
 
   useEffect(() => {
     const loadOwnerRequests = async () => {
-      const fetched = await apiFetchOwnerBookings(user?.id);
-      if (fetched && fetched.length > 0) {
-        setOwnerBookings(fetched);
+      const ownerId = user?.id || user?.uid || user?.firebase_uid;
+      if (!ownerId) {
+        setOwnerBookings([]);
+        return;
       }
+      const fetched = await apiFetchOwnerBookings(ownerId);
+      setOwnerBookings(Array.isArray(fetched) ? fetched : []);
     };
     loadOwnerRequests();
-  }, [user?.id]);
+
+    const handleCreated = () => { loadOwnerRequests(); };
+    const handleUpdated = () => { loadOwnerRequests(); };
+    window.addEventListener('turfington_booking_created', handleCreated);
+    window.addEventListener('turfington_booking_updated', handleUpdated);
+
+    return () => {
+      window.removeEventListener('turfington_booking_created', handleCreated);
+      window.removeEventListener('turfington_booking_updated', handleUpdated);
+    };
+  }, [user?.id, user?.uid, user?.firebase_uid]);
 
   const handleApproveBooking = async (bookingId) => {
     await apiUpdateBookingStatus(bookingId, 'CONFIRMED');
@@ -1323,8 +1307,12 @@ export default function VenueManager({ user, venueOffers, setVenueOffers }) {
 
   useEffect(() => {
     const loadOwnerVenues = async () => {
-      if (!user?.id) return;
-      const dbVenues = await apiFetchVenues({ ownerId: user.id });
+      const ownerId = user?.id || user?.uid || user?.firebase_uid;
+      if (!ownerId) {
+        setVenues([]);
+        return;
+      }
+      const dbVenues = await apiFetchVenues({ ownerId });
       if (dbVenues && dbVenues.length > 0) {
         const formatted = dbVenues.map(v => ({
           id: v.id,
@@ -1335,17 +1323,19 @@ export default function VenueManager({ user, venueOffers, setVenueOffers }) {
           pricePerHour: v.price_per_hr || 1000,
           image: v.image,
           totalSlots: 24,
-          bookedToday: 8,
-          revenue: { week: (v.price_per_hr || 1000) * 12, month: (v.price_per_hr || 1000) * 48 },
+          bookedToday: 0,
+          revenue: { week: 0, month: 0 },
           slots: generateSlots(),
           active: true,
           description: v.surface || 'Synthetic Turf Venue'
         }));
         setVenues(formatted);
+      } else {
+        setVenues([]);
       }
     };
     loadOwnerVenues();
-  }, [user?.id]);
+  }, [user?.id, user?.uid, user?.firebase_uid]);
 
   const handleAdd = async (newVenueData) => {
     const dbRes = await apiCreateVenue({

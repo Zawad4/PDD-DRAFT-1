@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Calendar, Clock, Users, Trophy, MapPin, CheckCircle,
@@ -10,7 +10,7 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
-import { apiFetchBookings, apiCreateDirectChat, apiFetchMessages, apiSendMessage } from '../services/db';
+import { apiFetchBookings, apiFetchOwnerBookings, apiCreateDirectChat, apiFetchMessages, apiSendMessage, apiUpdateBookingStatus } from '../services/db';
 
 /* ════════════════════════════════════════════════════════════
    PLAYER DASHBOARD
@@ -207,35 +207,150 @@ function ContactOwnerModal({ booking, user, onClose }) {
   );
 }
 
-function PlayerDashboard({ user }) {
+function formatBookingItem(b) {
+  if (!b) return null;
+  const rawPrice = b.price != null ? b.price : (b.amount_paid != null ? b.amount_paid : 1200);
+  const numPrice = typeof rawPrice === 'number' 
+    ? rawPrice 
+    : (parseInt(String(rawPrice).replace(/\D/g, ''), 10) || 1200);
+
+  // Normalize status
+  let status = b.status || 'PENDING OWNER APPROVAL';
+  const upperStatus = String(status).toUpperCase();
+  if (upperStatus.includes('CONFIRM') || upperStatus.includes('APPROV')) {
+    status = 'confirmed';
+  } else if (upperStatus.includes('CANCEL')) {
+    status = 'cancelled';
+  } else if (upperStatus.includes('REJECT')) {
+    status = 'rejected';
+  } else if (upperStatus.includes('PENDING')) {
+    status = 'PENDING OWNER APPROVAL';
+  }
+
+  const rawTime = b.time || b.slot_time || 'Today, 08:00 PM - 09:00 PM';
+  let date = b.date;
+  let time = rawTime;
+  if (!date) {
+    if (rawTime.includes(',')) {
+      const parts = rawTime.split(',');
+      date = parts[0].trim();
+      time = parts.slice(1).join(',').trim();
+    } else {
+      date = 'Today';
+    }
+  }
+
+  return {
+    id: b.id,
+    venue: b.venue || b.venue_name || b.title || 'Sports Arena',
+    venue_name: b.venue || b.venue_name || b.title || 'Sports Arena',
+    sport: b.sport || 'Football',
+    date: date,
+    time: time,
+    slot_time: time,
+    price: numPrice,
+    status: status,
+    fine: b.fine || 0,
+    rejection_reason: b.rejection_reason || b.rejectionReason || null,
+    image: b.image || b.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=200',
+    user_id: b.user_id || b.userId || null,
+    userId: b.user_id || b.userId || null,
+    isHosted: b.isHosted || b.is_hosted || b.bookingType === 'open_match',
+    joinedPlayers: b.joinedPlayers || b.joined_players || b.currentPlayers || b.existing_players_count || 1,
+    capacity: b.capacity || 10,
+    owner_id: b.owner_id || b.ownerId || 'usr_venue_owner',
+    owner_name: b.owner_name || b.ownerName || b.venue || b.venue_name || 'Venue Owner',
+    created_at: b.created_at || b.createdAt
+  };
+}
+
+function PlayerDashboard({ user, appBookings, setAppBookings, setTab }) {
   const [view, setView] = useState('week'); // 'week' | 'month'
-  const [bookings, setBookings] = useState(PLAYER_BOOKINGS);
+  const [bookings, setBookings] = useState(() => {
+    try {
+      const currentUserId = user?.id || user?.uid || user?.firebase_uid;
+      const sU = currentUserId ? localStorage.getItem(`turfington_user_bookings_${currentUserId}`) : null;
+      if (sU) {
+        const pU = JSON.parse(sU);
+        if (Array.isArray(pU) && pU.length > 0) return pU.map(formatBookingItem);
+      }
+      const s1 = localStorage.getItem('turfington_user_bookings');
+      if (s1) {
+        const p1 = JSON.parse(s1);
+        if (Array.isArray(p1)) {
+          const userOnly = currentUserId ? p1.filter(b => b.user_id === currentUserId || b.userId === currentUserId) : [];
+          if (userOnly.length > 0) return userOnly.map(formatBookingItem);
+        }
+      }
+    } catch {}
+    return [];
+  });
   const [cancelTarget, setCancelTarget] = useState(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [contactingBooking, setContactingBooking] = useState(null);
 
-  useEffect(() => {
-    const loadUserDbBookings = async () => {
-      if (!user?.id) return;
-      const dbBookings = await apiFetchBookings({ userId: user.id });
-      if (dbBookings && dbBookings.length > 0) {
-        const formatted = dbBookings.map(b => ({
-          id: b.id,
-          venue: b.venue_name || 'Sports Turf',
-          sport: b.sport || 'Football',
-          date: b.date || 'Today',
-          time: b.slot_time || '08:00 PM - 09:00 PM',
-          price: parseInt(String(b.price).replace(/\D/g, '')) || 1200,
-          status: b.status?.toLowerCase() || 'confirmed',
-          image: b.image || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=200'
-        }));
-        setBookings(formatted);
-      }
+  const loadUserDbBookings = async () => {
+    const currentUserId = user?.id || user?.uid || user?.firebase_uid;
+    if (!currentUserId) {
+      setBookings([]);
+      if (setAppBookings) setAppBookings([]);
+      return;
+    }
+    const dbBookings = await apiFetchBookings(currentUserId);
+
+    let localU = [];
+    try {
+      const sU = localStorage.getItem(`turfington_user_bookings_${currentUserId}`);
+      if (sU) localU = JSON.parse(sU);
+    } catch {}
+
+    const isUserBooking = (b) => {
+      if (!b) return false;
+      const bUid = b.user_id || b.userId;
+      if (!bUid) return false;
+      return bUid === currentUserId || (user?.firebase_uid && bUid === user.firebase_uid) || (user?.id && bUid === user.id);
     };
+
+    let local1 = [];
+    try {
+      const s1 = localStorage.getItem('turfington_user_bookings');
+      if (s1) {
+        const p1 = JSON.parse(s1);
+        if (Array.isArray(p1)) local1 = p1.filter(isUserBooking);
+      }
+    } catch {}
+
+    const appUserBookings = (appBookings || []).filter(isUserBooking);
+    const combined = [...(dbBookings || []), ...localU, ...local1, ...appUserBookings];
+    const map = new Map();
+    combined.forEach(b => {
+      if (b && b.id) {
+        const item = formatBookingItem(b);
+        if (item) map.set(String(b.id), item);
+      }
+    });
+
+    const list = Array.from(map.values());
+    setBookings(list);
+    if (setAppBookings) setAppBookings(list);
+  };
+
+  useEffect(() => {
     loadUserDbBookings();
-  }, [user?.id]);
+
+    const handleCreated = () => { loadUserDbBookings(); };
+    const handleUpdated = () => { loadUserDbBookings(); };
+    window.addEventListener('turfington_booking_created', handleCreated);
+    window.addEventListener('turfington_booking_updated', handleUpdated);
+
+    return () => {
+      window.removeEventListener('turfington_booking_created', handleCreated);
+      window.removeEventListener('turfington_booking_updated', handleUpdated);
+    };
+  }, [user?.id, user?.uid, user?.firebase_uid, appBookings]);
 
   const confirmed = bookings.filter(b => b.status === 'confirmed');
+  const pending = bookings.filter(b => b.status === 'PENDING OWNER APPROVAL');
   const cancelled = bookings.filter(b => b.status === 'cancelled');
   const totalSpent = confirmed.reduce((s, b) => s + b.price, 0);
   const totalFines = cancelled.reduce((s, b) => s + (b.fine || 0), 0);
@@ -245,12 +360,15 @@ function PlayerDashboard({ user }) {
     setShowCancelModal(true);
   };
 
-  const handleConfirmCancel = () => {
+  const handleConfirmCancel = async () => {
     if (!cancelTarget) return;
     const fine = Math.round(cancelTarget.price * 0.10);
-    setBookings(prev => prev.map(b =>
+    const updated = bookings.map(b =>
       b.id === cancelTarget.id ? { ...b, status: 'cancelled', fine } : b
-    ));
+    );
+    setBookings(updated);
+    if (setAppBookings) setAppBookings(updated);
+    await apiUpdateBookingStatus(cancelTarget.id, 'cancelled', 'Cancelled by player');
     setShowCancelModal(false);
     setCancelTarget(null);
   };
@@ -285,11 +403,12 @@ function PlayerDashboard({ user }) {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: view === 'week' ? 'Bookings Done (Week)' : 'Bookings Done (Month)', value: confirmed.length, icon: <CheckCircle className="w-4 h-4" />, color: 'indigo', sub: 'confirmed bookings' },
-          { label: 'Canceled Bookings',  value: cancelled.length,  icon: <XCircle className="w-4 h-4" />, color: 'rose', sub: '10% cancel fine' },
-          { label: 'Fines Paid', value: `₹${totalFines.toLocaleString('en-IN')}`, icon: <AlertTriangle className="w-4 h-4" />, color: 'amber', sub: 'cancellation penalty' },
+          { label: view === 'week' ? 'Bookings (Week)' : 'Bookings (Month)', value: confirmed.length, icon: <CheckCircle className="w-4 h-4" />, color: 'indigo', sub: 'confirmed sessions' },
+          { label: 'Pending Approval',  value: pending.length,    icon: <Clock className="w-4 h-4" />,        color: 'amber',  sub: 'awaiting counter review' },
+          { label: 'Canceled Bookings', value: cancelled.length,  icon: <XCircle className="w-4 h-4" />,      color: 'rose',   sub: 'released slots' },
+          { label: 'Fines Paid',        value: `₹${totalFines.toLocaleString('en-IN')}`, icon: <AlertTriangle className="w-4 h-4" />, color: 'amber', sub: 'cancellation penalty' },
         ].map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
             className="glass-card p-5 border border-white/5">
@@ -328,112 +447,143 @@ function PlayerDashboard({ user }) {
 
       {/* Bookings list */}
       <div>
-        <h3 className="font-display font-bold text-white text-sm uppercase tracking-wider mb-4">
-          Your Bookings
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {bookings.map((b, i) => {
-            const sc = SPORT_COLORS_PLAYER[b.sport] || {};
-            return (
-              <motion.div key={b.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
-                className={`glass-card flex flex-col justify-between p-4.5 border transition-all ${
-                  b.status === 'cancelled' ? 'border-rose-500/15 opacity-60' : 'border-white/5 hover:border-white/12'
-                }`}>
-                <div className="flex items-start gap-3.5 mb-3">
-                  {/* Venue image */}
-                  <img src={b.image} alt={b.venue} className="w-16 h-16 rounded-2xl object-cover border border-white/10 flex-shrink-0" />
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-display font-bold text-white text-sm uppercase tracking-wider">
+            Your Bookings
+          </h3>
+          <span className="text-xs text-neutral-400 font-medium">
+            {bookings.length} {bookings.length === 1 ? 'Booking' : 'Bookings'}
+          </span>
+        </div>
 
-                  {/* Info */}
-                  <div className="flex-grow min-w-0 text-left">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <h4 className="font-bold text-white text-sm truncate">{b.venue}</h4>
-                      <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${sc.badge || 'bg-white/5 text-neutral-400'}`}>
-                        {b.sport}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-neutral-400 mt-1 flex flex-col gap-0.5">
-                      <span className="flex items-center gap-1"><Calendar className="w-3 h-3 text-indigo-400" />{b.date}</span>
-                      <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-indigo-400" />{b.time}</span>
-                    </p>
-                    {b.status === 'cancelled' && b.fine && (
-                      <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" />
-                        Cancelled · ₹{b.fine} fine
-                      </p>
-                    )}
-                    {(b.status === 'rejected' || b.status === 'REJECTED') && (
-                      <div className="mt-2 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-300">
-                        <span className="font-bold">Owner Rejection Reason:</span> {b.rejection_reason || b.rejectionReason || 'Court unavailable at requested time'}
+        {bookings.length === 0 ? (
+          <div className="glass-card p-12 text-center border border-dashed border-white/10 rounded-2xl">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mx-auto mb-3">
+              <Calendar className="w-6 h-6 text-indigo-400" />
+            </div>
+            <h4 className="font-bold text-white text-base font-display">No turf bookings yet</h4>
+            <p className="text-xs text-neutral-400 mt-1 max-w-sm mx-auto">
+              You haven't reserved any slots yet. Browse nearby football, badminton, and cricket turfs to book your next session.
+            </p>
+            {setTab && (
+              <button 
+                type="button"
+                onClick={() => setTab('discovery')}
+                className="mt-4 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-full transition-all cursor-pointer shadow-lg shadow-indigo-600/30"
+              >
+                Discover & Book Turfs
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {bookings.map((b, i) => {
+              const sc = SPORT_COLORS_PLAYER[b.sport] || {};
+              return (
+                <motion.div key={b.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                  className={`glass-card flex flex-col justify-between p-4.5 border transition-all ${
+                    b.status === 'cancelled' ? 'border-rose-500/15 opacity-60' : 'border-white/5 hover:border-white/12'
+                  }`}>
+                  <div className="flex items-start gap-3.5 mb-3">
+                    {/* Venue image */}
+                    <img src={b.image} alt={b.venue} className="w-16 h-16 rounded-2xl object-cover border border-white/10 flex-shrink-0" />
+
+                    {/* Info */}
+                    <div className="flex-grow min-w-0 text-left">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h4 className="font-bold text-white text-sm truncate">{b.venue}</h4>
+                        <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${sc.badge || 'bg-white/5 text-neutral-400'}`}>
+                          {b.sport}
+                        </span>
                       </div>
+                      <p className="text-[11px] text-neutral-400 mt-1 flex flex-col gap-0.5">
+                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3 text-indigo-400" />{b.date}</span>
+                        <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-indigo-400" />{b.time}</span>
+                      </p>
+                      {b.status === 'cancelled' && b.fine ? (
+                        <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" />
+                          Cancelled · ₹{b.fine} fine
+                        </p>
+                      ) : null}
+                      {(b.status === 'rejected' || b.status === 'REJECTED') && (
+                        <div className="mt-2 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-300">
+                          <span className="font-bold">Owner Rejection Reason:</span> {b.rejection_reason || b.rejectionReason || 'Court unavailable at requested time'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Price + action bar */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-white/5">
+                    <span className="font-black text-white text-base font-display">₹{b.price.toLocaleString('en-IN')}</span>
+                    
+                    {b.status === 'confirmed' || b.status === 'CONFIRMED' || b.status === 'approved' ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button 
+                          type="button"
+                          onClick={() => setContactingBooking(b)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-300 text-[10px] font-bold rounded-full transition-all cursor-pointer"
+                          title="Chat with venue owner"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Contact Owner</span>
+                        </button>
+
+                        <span className="text-[9px] font-bold uppercase text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full flex items-center gap-1">
+                          <CheckCircle className="w-2.5 h-2.5" /> Confirmed
+                        </span>
+                        <button onClick={() => handleCancelRequest(b)}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 font-bold transition-colors cursor-pointer">
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (b.status === 'PENDING OWNER APPROVAL' || b.status === 'pending' || b.status === 'PENDING') ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button 
+                          type="button"
+                          onClick={() => setContactingBooking(b)}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/40 text-indigo-300 hover:text-white text-xs font-bold rounded-full transition-all cursor-pointer shadow-sm"
+                          title="Chat directly with venue owner while pending approval"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Contact Owner</span>
+                        </button>
+
+                        <span className="text-[9px] font-bold uppercase text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2.5 py-1 rounded-full flex items-center gap-1">
+                          <Clock className="w-2.5 h-2.5 text-amber-400" /> Pending Approval
+                        </span>
+                        <button onClick={() => handleCancelRequest(b)}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 font-bold transition-colors cursor-pointer">
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (b.status === 'rejected' || b.status === 'REJECTED') ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button 
+                          type="button"
+                          onClick={() => setContactingBooking(b)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-300 text-[10px] font-bold rounded-full transition-all cursor-pointer"
+                          title="Contact owner regarding rejected booking"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-neutral-400" />
+                          <span>Contact Owner</span>
+                        </button>
+                        <span className="text-[9px] font-bold uppercase text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2.5 py-1 rounded-full flex items-center gap-1">
+                          <XCircle className="w-2.5 h-2.5" /> Rejected by Owner
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-[9px] font-bold uppercase text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2.5 py-1 rounded-full flex items-center gap-1">
+                        <XCircle className="w-2.5 h-2.5" /> Cancelled
+                      </span>
                     )}
                   </div>
-                </div>
-
-                {/* Price + action bar */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-white/5">
-                  <span className="font-black text-white text-base font-display">₹{b.price.toLocaleString('en-IN')}</span>
-                  
-                  {b.status === 'confirmed' || b.status === 'CONFIRMED' || b.status === 'approved' ? (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button 
-                        type="button"
-                        onClick={() => setContactingBooking(b)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-300 text-[10px] font-bold rounded-full transition-all cursor-pointer"
-                        title="Chat with venue owner"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>Contact Owner</span>
-                      </button>
-
-                      <span className="text-[9px] font-bold uppercase text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full flex items-center gap-1">
-                        <CheckCircle className="w-2.5 h-2.5" /> Confirmed
-                      </span>
-                      <button onClick={() => handleCancelRequest(b)}
-                        className="text-[10px] text-rose-400 hover:text-rose-300 font-bold transition-colors cursor-pointer">
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (b.status === 'PENDING OWNER APPROVAL' || b.status === 'pending' || b.status === 'PENDING') ? (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button 
-                        type="button"
-                        onClick={() => setContactingBooking(b)}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/40 text-indigo-300 hover:text-white text-xs font-bold rounded-full transition-all cursor-pointer shadow-sm"
-                        title="Chat directly with venue owner while pending approval"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>Contact Owner</span>
-                      </button>
-
-                      <span className="text-[9px] font-bold uppercase text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2.5 py-1 rounded-full flex items-center gap-1">
-                        <Clock className="w-2.5 h-2.5 text-amber-400" /> Pending Owner Approval
-                      </span>
-                    </div>
-                  ) : (b.status === 'rejected' || b.status === 'REJECTED') ? (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button 
-                        type="button"
-                        onClick={() => setContactingBooking(b)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-300 text-[10px] font-bold rounded-full transition-all cursor-pointer"
-                        title="Contact owner regarding rejected booking"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5 text-neutral-400" />
-                        <span>Contact Owner</span>
-                      </button>
-                      <span className="text-[9px] font-bold uppercase text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2.5 py-1 rounded-full flex items-center gap-1">
-                        <XCircle className="w-2.5 h-2.5" /> Rejected by Owner
-                      </span>
-                    </div>
-                  ) : (
-                    <span className="text-[9px] font-bold uppercase text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2.5 py-1 rounded-full flex items-center gap-1">
-                      <XCircle className="w-2.5 h-2.5" /> Cancelled
-                    </span>
-                  )}
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Cancel confirmation modal */}
@@ -493,14 +643,6 @@ const OWNER_BOOKINGS_WEEK = [
   { day: 'Sun', bookings: 22, cancelled: 1, revenue: 82500  },
 ];
 
-const OWNER_RECENT_BOOKINGS = [
-  { id: 1, player: 'Rahul Sharma',   avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=60', venue: 'Vanguard Sports Arena', sport: 'Football',  time: 'Today, 6:00 PM',   price: 3750, status: 'confirmed' },
-  { id: 2, player: 'Pooja Reddy',    avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=60', venue: 'Smash Club Badminton',  sport: 'Badminton', time: 'Today, 7:30 PM',   price: 2500, status: 'confirmed' },
-  { id: 3, player: 'Deepak Kumar',   avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=60', venue: 'Vanguard Sports Arena', sport: 'Football',  time: 'Today, 9:00 PM',   price: 3750, status: 'cancelled', fine: 375 },
-  { id: 4, player: 'Divya Thomas',   avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=60', venue: 'Smash Club Badminton',  sport: 'Table Tennis', time: 'Tomorrow, 8:00 AM', price: 2500, status: 'confirmed' },
-  { id: 5, player: 'Arjun Sharma',  avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=60', venue: 'Vanguard Sports Arena', sport: 'Football',  time: 'Tomorrow, 6:00 PM', price: 3750, status: 'confirmed' },
-];
-
 const SPORT_SPLIT = [
   { name: 'Football', value: 42, color: '#10b981' },
   { name: 'Badminton', value: 28, color: '#6366f1' },
@@ -509,10 +651,41 @@ const SPORT_SPLIT = [
 ];
 
 function OwnerDashboard({ user }) {
-  const totalRevenue = OWNER_BOOKINGS_WEEK.reduce((s, d) => s + d.revenue, 0);
-  const totalBookings = OWNER_BOOKINGS_WEEK.reduce((s, d) => s + d.bookings, 0);
-  const totalCancelled = OWNER_BOOKINGS_WEEK.reduce((s, d) => s + d.cancelled, 0);
-  const finesCollected = OWNER_RECENT_BOOKINGS.filter(b => b.status === 'cancelled').reduce((s, b) => s + (b.fine || 0), 0);
+  const [recentBookings, setRecentBookings] = useState([]);
+  const [loadingBookings, setLoadingBookings] = useState(true);
+
+  useEffect(() => {
+    const loadOwnerBookings = async () => {
+      const ownerId = user?.id || user?.uid || user?.firebase_uid;
+      if (!ownerId) {
+        setRecentBookings([]);
+        setLoadingBookings(false);
+        return;
+      }
+      setLoadingBookings(true);
+      const bks = await apiFetchOwnerBookings(ownerId);
+      setRecentBookings(Array.isArray(bks) ? bks : []);
+      setLoadingBookings(false);
+    };
+
+    loadOwnerBookings();
+    const handleCreated = () => { loadOwnerBookings(); };
+    const handleUpdated = () => { loadOwnerBookings(); };
+    window.addEventListener('turfington_booking_created', handleCreated);
+    window.addEventListener('turfington_booking_updated', handleUpdated);
+    return () => {
+      window.removeEventListener('turfington_booking_created', handleCreated);
+      window.removeEventListener('turfington_booking_updated', handleUpdated);
+    };
+  }, [user?.id, user?.uid, user?.firebase_uid]);
+
+  const totalRevenue = recentBookings.reduce((s, b) => {
+    const p = typeof b.price === 'number' ? b.price : (parseInt(String(b.price || 0).replace(/\D/g, ''), 10) || 0);
+    return s + (b.status !== 'cancelled' && b.status !== 'REJECTED' ? p : 0);
+  }, 0);
+  const totalBookings = recentBookings.length;
+  const totalCancelled = recentBookings.filter(b => b.status === 'cancelled' || b.status === 'REJECTED').length;
+  const finesCollected = recentBookings.filter(b => b.status === 'cancelled').reduce((s, b) => s + (b.fine || 0), 0);
 
   return (
     <div className="space-y-8">
@@ -643,28 +816,46 @@ function OwnerDashboard({ user }) {
                 </tr>
               </thead>
               <tbody>
-                {OWNER_RECENT_BOOKINGS.map((b, i) => (
-                  <tr key={b.id} className={`border-b border-white/5 last:border-0 hover:bg-white/[0.02] transition-colors ${b.status === 'cancelled' ? 'opacity-50' : ''}`}>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2.5">
-                        <img src={b.avatar} alt={b.player} className="w-7 h-7 rounded-full object-cover border border-white/10" />
-                        <span className="font-bold text-white">{b.player}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3.5 text-neutral-400">{b.venue}</td>
-                    <td className="px-5 py-3.5 text-neutral-400">{b.sport}</td>
-                    <td className="px-5 py-3.5 text-neutral-400">{b.time}</td>
-                    <td className="px-5 py-3.5 font-bold text-white">
-                      ₹{b.price.toLocaleString('en-IN')}
-                      {b.fine && <span className="block text-[10px] text-amber-400 font-normal">+₹{b.fine} fine</span>}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <span className={`text-[9px] font-extrabold uppercase px-2.5 py-1 rounded-full border ${
-                        b.status === 'confirmed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                      }`}>{b.status}</span>
+                {recentBookings.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-8 text-center text-neutral-500">
+                      <p className="text-xs font-semibold">No recent bookings yet</p>
+                      <p className="text-[11px] text-neutral-600 mt-1">When players reserve slots at your venues, their bookings will appear here in real time.</p>
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  recentBookings.map((b) => {
+                    const priceNum = typeof b.price === 'number' ? b.price : (parseInt(String(b.price || 0).replace(/\D/g, ''), 10) || 0);
+                    const playerName = b.player_name || b.user_name || b.playerName || 'Player';
+                    const avatarUrl = b.avatar || b.player_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${playerName}`;
+                    const venueTitle = b.venue || b.venue_name || b.title || 'Sports Arena';
+                    const timeStr = b.time || b.slot_time || 'Scheduled Slot';
+                    const isConfirmed = b.status === 'confirmed' || b.status === 'CONFIRMED' || b.status === 'APPROVED';
+                    const isCancelled = b.status === 'cancelled' || b.status === 'REJECTED';
+                    return (
+                      <tr key={b.id} className={`border-b border-white/5 last:border-0 hover:bg-white/[0.02] transition-colors ${isCancelled ? 'opacity-50' : ''}`}>
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <img src={avatarUrl} alt={playerName} className="w-7 h-7 rounded-full object-cover border border-white/10" />
+                            <span className="font-bold text-white">{playerName}</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3.5 text-neutral-400">{venueTitle}</td>
+                        <td className="px-5 py-3.5 text-neutral-400">{b.sport || 'Sports'}</td>
+                        <td className="px-5 py-3.5 text-neutral-400">{timeStr}</td>
+                        <td className="px-5 py-3.5 font-bold text-white">
+                          ₹{priceNum.toLocaleString('en-IN')}
+                          {b.fine ? <span className="block text-[10px] text-amber-400 font-normal">+₹{b.fine} fine</span> : null}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span className={`text-[9px] font-extrabold uppercase px-2.5 py-1 rounded-full border ${
+                            isConfirmed ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : isCancelled ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                          }`}>{b.status || 'PENDING'}</span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -677,14 +868,19 @@ function OwnerDashboard({ user }) {
 /* ════════════════════════════════════════════════════════════
    MAIN EXPORT — picks dashboard by role
    ════════════════════════════════════════════════════════════ */
-export default function Dashboard({ user, role }) {
+export default function Dashboard({ user, role, bookings, setBookings, setTab }) {
   const effectiveRole = role || user?.role;
 
   return (
     <div className="min-h-screen bg-transparent pt-24 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-left">
       {effectiveRole === 'owner'
         ? <OwnerDashboard user={user} />
-        : <PlayerDashboard user={user} />
+        : <PlayerDashboard 
+            user={user} 
+            appBookings={bookings} 
+            setAppBookings={setBookings} 
+            setTab={setTab} 
+          />
       }
     </div>
   );

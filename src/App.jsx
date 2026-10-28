@@ -4,7 +4,7 @@ import {
   Compass, Home as HomeIcon, ShoppingBag, Trophy,
   User, LayoutDashboard, Menu, Building2, ChevronDown,
   LogOut, Settings, UserCircle, MapPin, Flame, Loader2,
-  ArrowLeftRight, RefreshCw, Headphones, MessageSquare
+  ArrowLeftRight, RefreshCw, Headphones, MessageSquare, X
 } from 'lucide-react';
 
 import { Suspense, lazy } from 'react';
@@ -25,7 +25,7 @@ const Community = lazy(() => import('./pages/Community'));
 
 import { auth } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { apiFetchProfile, apiFetchProfileByEmail, apiSaveSavedProfile } from './services/db';
+import { apiFetchProfile, apiFetchProfileByEmail, apiSaveSavedProfile, apiFetchBookings } from './services/db';
 import { ensureUserProfile } from './services/chatService';
 import ProfileSwitcherModal from './components/ProfileSwitcherModal';
 import UserAvatar from './components/UserAvatar';
@@ -132,6 +132,13 @@ export default function App() {
     // Non-blocking database sync
     apiSaveSavedProfile(sanitized, sanitized.email || sanitized.id).catch(() => {});
 
+    // Sync user-scoped bookings & matches
+    apiFetchBookings(sanitized.id).then(userBks => {
+      setBookings(Array.isArray(userBks) ? userBks : []);
+    });
+    setJoinedMatches(loadLocalState(`turfington_joined_matches_${sanitized.id}`, []));
+    setMatchRequests(loadLocalState(`turfington_match_requests_${sanitized.id}`, []));
+
     // Switch tab smoothly without crash or reload
     if (sanitized.role === 'owner') {
       setActiveTab('venue-manager');
@@ -156,42 +163,125 @@ export default function App() {
   /* ── global state hub ────────────────────────────────────── */
   const [cart, setCart] = useState(() => loadLocalState('turfington_cart', []));
   const [likedProducts, setLikedProducts] = useState(() => loadLocalState('turfington_liked_products', []));
-  const [joinedMatches, setJoinedMatches] = useState(() => loadLocalState('turfington_joined_matches', [101]));
-  const [matchRequests, setMatchRequests] = useState(() => loadLocalState('turfington_match_requests', [
-    {
-      id: 'req_101_user',
-      matchId: 101,
-      userId: 'usr_amit_patel',
-      userName: 'Rahul Sharma',
-      userAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200',
-      status: 'approved',
-      seriousnessScore: 96,
-      loyaltyScore: 92,
-      punctualityScore: 98,
-      requestedAt: 'Yesterday, 6:00 PM'
-    },
-    {
-      id: 'req_102_user',
-      matchId: 102,
-      userId: 'usr_amit_patel',
-      userName: 'Ananya Verma',
-      userAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=200',
-      status: 'pending_approval',
-      seriousnessScore: 94,
-      loyaltyScore: 90,
-      punctualityScore: 96,
-      requestedAt: 'Today, 2:15 PM'
-    }
-  ]));
+  const [joinedMatches, setJoinedMatches] = useState(() => {
+    const uid = activeProfile?.id || activeProfile?.firebase_uid;
+    return uid ? loadLocalState(`turfington_joined_matches_${uid}`, []) : [];
+  });
+  const [matchRequests, setMatchRequests] = useState(() => {
+    const uid = activeProfile?.id || activeProfile?.firebase_uid;
+    return uid ? loadLocalState(`turfington_match_requests_${uid}`, []) : [];
+  });
 
   const [regulationsTargetMatch, setRegulationsTargetMatch] = useState(null);
   const [cancellationTargetMatch, setCancellationTargetMatch] = useState(null);
   const [hostReviewTargetMatch, setHostReviewTargetMatch] = useState(null);
 
-  const [bookings, setBookings] = useState(() => loadLocalState('turfington_bookings', [
-    { id: 99, title: 'Vanguard Astro Turf 1', sport: 'Football', time: 'Today, 8:00 PM', price: '₹1,200/hr',
-      image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=400' }
-  ]));
+  const [bookings, setBookings] = useState(() => {
+    const uid = activeProfile?.id || activeProfile?.firebase_uid;
+    if (uid) {
+      const s = loadLocalState(`turfington_user_bookings_${uid}`, null);
+      if (Array.isArray(s)) return s;
+    }
+    return [];
+  });
+
+  /* ── real-time chat notifications & unread counts ────────── */
+  const [incomingMessageToast, setIncomingMessageToast] = useState(null);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+
+  const updateUnreadCount = () => {
+    const uid = user?.id || user?.firebase_uid || user?.uid;
+    if (!uid) return;
+    try {
+      const inboxKey = `turfington_inbox_${uid}`;
+      const inbox = JSON.parse(localStorage.getItem(inboxKey) || '[]');
+      const count = inbox.reduce((acc, curr) => acc + (curr.unreadCount || 0), 0);
+      setUnreadMessageCount(count);
+    } catch {
+      setUnreadMessageCount(0);
+    }
+  };
+
+  useEffect(() => {
+    updateUnreadCount();
+  }, [user?.id, activeTab]);
+
+  useEffect(() => {
+    if (!incomingMessageToast) return;
+    const timer = setTimeout(() => {
+      setIncomingMessageToast(null);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [incomingMessageToast]);
+
+  useEffect(() => {
+    const handleMsgReceived = (e) => {
+      const detail = e.detail;
+      if (!detail) return;
+      const currentUid = user?.id || user?.firebase_uid || user?.uid;
+
+      if (detail.recipientUid === currentUid && detail.senderUid !== currentUid) {
+        setIncomingMessageToast({
+          conversationId: detail.conversationId,
+          senderName: detail.senderName || 'Athlete',
+          senderAvatar: detail.senderAvatar || '/bowling_group.jpg',
+          text: detail.text || 'Sent you a message'
+        });
+
+        // Desktop browser notification if granted
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification(`💬 ${detail.senderName || 'New Message'}`, {
+              body: detail.text,
+              icon: detail.senderAvatar || '/bowling_group.jpg'
+            });
+          } catch {}
+        }
+      }
+      updateUnreadCount();
+    };
+
+    const handleStorageChange = (e) => {
+      if (e.key === 'turfington_last_message_event' && e.newValue) {
+        try {
+          const detail = JSON.parse(e.newValue);
+          handleMsgReceived({ detail });
+        } catch {}
+      }
+    };
+
+    window.addEventListener('turfington_message_received', handleMsgReceived);
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('turfington_message_received', handleMsgReceived);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    const handleCreated = (e) => {
+      if (e.detail) {
+        setBookings(prev => [e.detail, ...(prev || []).filter(b => b.id !== e.detail.id)]);
+      }
+    };
+    const handleUpdated = (e) => {
+      if (e.detail?.bookingId) {
+        setBookings(prev => (prev || []).map(b => b.id === e.detail.bookingId ? { ...b, status: e.detail.status, rejection_reason: e.detail.rejectionReason } : b));
+      }
+    };
+    window.addEventListener('turfington_booking_created', handleCreated);
+    window.addEventListener('turfington_booking_updated', handleUpdated);
+    return () => {
+      window.removeEventListener('turfington_booking_created', handleCreated);
+      window.removeEventListener('turfington_booking_updated', handleUpdated);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (user?.id) {
+      saveLocalState(`turfington_user_bookings_${user.id}`, bookings);
+    }
+  }, [bookings, user?.id]);
 
   useEffect(() => {
     saveLocalState('turfington_venue_offers', venueOffers);
@@ -206,12 +296,16 @@ export default function App() {
   }, [likedProducts]);
 
   useEffect(() => {
-    saveLocalState('turfington_joined_matches', joinedMatches);
-  }, [joinedMatches]);
+    if (user?.id) {
+      saveLocalState(`turfington_joined_matches_${user.id}`, joinedMatches);
+    }
+  }, [joinedMatches, user?.id]);
 
   useEffect(() => {
-    saveLocalState('turfington_match_requests', matchRequests);
-  }, [matchRequests]);
+    if (user?.id) {
+      saveLocalState(`turfington_match_requests_${user.id}`, matchRequests);
+    }
+  }, [matchRequests, user?.id]);
 
   useEffect(() => {
     saveLocalState('turfington_bookings', bookings);
@@ -397,6 +491,69 @@ export default function App() {
     <div className={`min-h-screen flex flex-col font-sans select-none antialiased bg-[#080808] text-white`}>
       <AnimatePresence>{showRoleSelect && roleSelectEl}</AnimatePresence>
 
+      {/* ── FLOATING INCOMING MESSAGE TOAST NOTIFICATION ── */}
+      <AnimatePresence>
+        {incomingMessageToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -25, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -25, scale: 0.95 }}
+            transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+            onClick={() => {
+              handleNavClick('community');
+              if (incomingMessageToast.conversationId) {
+                setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent('turfington_open_chat', {
+                    detail: { conversationId: incomingMessageToast.conversationId }
+                  }));
+                }, 100);
+              }
+              setIncomingMessageToast(null);
+            }}
+            className="fixed top-24 right-4 sm:right-8 z-50 max-w-sm w-[calc(100vw-32px)] sm:w-96 bg-[#121218]/95 border border-indigo-500/40 rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.6)] backdrop-blur-2xl p-4 flex items-center gap-3.5 cursor-pointer hover:border-indigo-400 transition-all group"
+          >
+            <div className="relative flex-shrink-0">
+              <img
+                src={incomingMessageToast.senderAvatar || '/bowling_group.jpg'}
+                alt=""
+                className="w-12 h-12 rounded-2xl object-cover border border-white/10 shadow-sm"
+              />
+              <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-[9px] text-white">
+                💬
+              </span>
+            </div>
+
+            <div className="flex-grow min-w-0">
+              <div className="flex items-center justify-between gap-1">
+                <h5 className="font-display font-black text-xs text-white truncate group-hover:text-indigo-300 transition-colors">
+                  {incomingMessageToast.senderName}
+                </h5>
+                <span className="text-[10px] text-indigo-400 font-extrabold uppercase px-1.5 py-0.5 rounded bg-indigo-500/10">
+                  New Message
+                </span>
+              </div>
+              <p className="text-xs text-neutral-300 truncate mt-0.5 font-normal">
+                {incomingMessageToast.text}
+              </p>
+              <p className="text-[10px] text-neutral-500 mt-1 flex items-center gap-1 font-medium">
+                <span>Tap to open chat</span>
+                <span>→</span>
+              </p>
+            </div>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIncomingMessageToast(null);
+              }}
+              className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── NAVBAR ──────────────────────────────────────────── */}
       <header className="fixed top-0 left-0 right-0 z-40 w-full glass-nav">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
@@ -413,6 +570,11 @@ export default function App() {
               <button key={item.id} onClick={() => handleNavClick(item.id)}
                 className={`relative hover:text-white transition-colors py-2 px-1 flex items-center gap-1.5 ${activeTab === item.id ? 'text-white' : ''}`}>
                 <span>{item.label}</span>
+                {item.id === 'community' && unreadMessageCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center animate-pulse shadow-sm">
+                    {unreadMessageCount}
+                  </span>
+                )}
                 {item.badge && (
                   <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400 border border-violet-500/30">{item.badge}</span>
                 )}
@@ -560,7 +722,8 @@ export default function App() {
                 toggleJoinMatch={(id) => setJoinedMatches(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
                 bookings={bookings} setBookings={setBookings} user={user}
                 initialSport={preSelectedSport} setInitialSport={setPreSelectedSport}
-                venueOffers={venueOffers} 
+                venueOffers={venueOffers}
+                setTab={handleNavClick}
               />
             )}
             {activeTab === 'marketplace' && (
@@ -592,7 +755,15 @@ export default function App() {
                 }} 
               />
             )}
-            {activeTab === 'dashboard' && <Dashboard user={user} role={user?.role} />}
+            {activeTab === 'dashboard' && (
+              <Dashboard 
+                user={user} 
+                role={user?.role} 
+                bookings={bookings} 
+                setBookings={setBookings} 
+                setTab={handleNavClick}
+              />
+            )}
           </Suspense>
         </ErrorBoundary>
 
@@ -666,12 +837,17 @@ export default function App() {
             ]
         ).map(({ id, Icon, label }) => (
           <button key={id} onClick={() => handleNavClick(id)}
-            className={`flex flex-col items-center space-y-1 transition-colors ${
+            className={`flex flex-col items-center space-y-1 transition-colors relative ${
               activeTab === id
                 ? id === 'venue-manager' ? 'text-violet-400' : 'text-white'
                 : 'text-neutral-500'
             }`}>
-            <Icon className="w-5 h-5" />
+            <div className="relative">
+              <Icon className="w-5 h-5" />
+              {id === 'community' && unreadMessageCount > 0 && (
+                <span className="absolute -top-1 -right-1.5 w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse border border-[#080808]" />
+              )}
+            </div>
             <span className="text-[9px] font-bold uppercase tracking-wider">{label}</span>
           </button>
         ))}

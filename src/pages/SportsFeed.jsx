@@ -36,6 +36,40 @@ export default function SportsFeed({ user }) {
   const [showImageInput, setShowImageInput] = useState(false);
   const [selectedTag, setSelectedTag] = useState('🏆 Achievement');
   const [isPosting, setIsPosting] = useState(false);
+  const [copiedPostId, setCopiedPostId] = useState(null);
+  const [shareToast, setShareToast] = useState('');
+
+  const handleSharePost = async (post) => {
+    const textSnippet = post.content ? `"${post.content.slice(0, 80)}..."` : 'Check out this post on Turfington!';
+    const shareUrl = window.location.href;
+    const shareData = {
+      title: 'Turfington Sports Feed',
+      text: `${post.author} on Turfington: ${textSnippet}`,
+      url: shareUrl
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (err) {
+        if (err.name !== 'AbortError') console.warn('Share error:', err);
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(`${shareData.text}\n${shareUrl}`);
+      setCopiedPostId(post.id);
+      setShareToast('Post link copied to clipboard!');
+      setTimeout(() => {
+        setCopiedPostId(null);
+        setShareToast('');
+      }, 2500);
+    } catch {
+      setShareToast('Could not copy link');
+      setTimeout(() => setShareToast(''), 2500);
+    }
+  };
 
   const loadDbPosts = useCallback(async () => {
     const dbPosts = await apiFetchPosts();
@@ -309,14 +343,46 @@ export default function SportsFeed({ user }) {
                   <span>{post.comments} Comments</span>
                 </button>
 
-                <button className="hover:text-white transition-colors flex items-center space-x-1 cursor-pointer">
-                  <Share2 className="w-4 h-4" />
+                <button 
+                  type="button"
+                  onClick={() => handleSharePost(post)}
+                  className={`hover:text-white transition-colors flex items-center space-x-1.5 cursor-pointer text-xs ${
+                    copiedPostId === post.id ? 'text-emerald-400 font-bold' : 'text-neutral-400'
+                  }`}
+                  title="Share post"
+                >
+                  {copiedPostId === post.id ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-400" />
+                      <span className="text-[11px] font-bold text-emerald-400">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="w-4 h-4" />
+                      <span className="text-[11px]">Share</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
           ))}
         </div>
       </div>
+
+      {/* Floating Share Toast Notification */}
+      <AnimatePresence>
+        {shareToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="fixed bottom-6 right-6 z-50 px-4 py-2.5 bg-emerald-600 text-white font-bold text-xs rounded-2xl shadow-2xl flex items-center gap-2 border border-emerald-400/30"
+          >
+            <Check className="w-4 h-4" />
+            <span>{shareToast}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

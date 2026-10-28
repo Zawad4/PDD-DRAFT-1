@@ -309,8 +309,16 @@ export default function Auth({ onLogin }) {
 
     try {
       setLoading(true);
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
       if (isSignUp) {
-        const targetEmail = email.trim().toLowerCase();
+        const targetEmail = email.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase();
+        if (!emailRegex.test(targetEmail)) {
+          setErrors({ email: 'Please enter a valid email address (e.g. name@example.com)' });
+          setLoading(false);
+          return;
+        }
+
         const existingProf = await apiFetchProfileByEmail(targetEmail);
         if (existingProf) {
           setLoading(false);
@@ -324,7 +332,7 @@ export default function Auth({ onLogin }) {
           return;
         }
 
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        const cred = await createUserWithEmailAndPassword(auth, targetEmail, password);
 
         const { success, profile, error } = await apiCreateProfile({
           firebase_uid: cred.user.uid,
@@ -342,16 +350,27 @@ export default function Auth({ onLogin }) {
           setLoading(false);
         }
       } else {
-        let loginEmail = email.trim().toLowerCase();
+        let rawInput = email.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+        if (rawInput.startsWith('@')) {
+          rawInput = rawInput.slice(1).trim();
+        }
+
+        let loginEmail = rawInput.toLowerCase();
+
         // If it doesn't look like an email, assume it's a username
-        if (!loginEmail.includes('@')) {
-          const fetchedEmail = await apiGetEmailByUsername(loginEmail);
-          if (!fetchedEmail) {
-            setErrors({ email: 'email/username not found' });
+        if (!emailRegex.test(loginEmail)) {
+          const fetchedEmail = await apiGetEmailByUsername(rawInput);
+          if (fetchedEmail && emailRegex.test(fetchedEmail)) {
+            loginEmail = fetchedEmail;
+          } else if (!loginEmail.includes('@')) {
+            setErrors({ email: 'Username not found. Please enter your registered email.' });
+            setLoading(false);
+            return;
+          } else {
+            setErrors({ email: 'Please enter a valid email address (e.g. name@example.com)' });
             setLoading(false);
             return;
           }
-          loginEmail = fetchedEmail;
         }
 
         const cred = await signInWithEmailAndPassword(auth, loginEmail, password);
@@ -395,7 +414,8 @@ export default function Auth({ onLogin }) {
       }
     } catch (error) {
       setLoading(false);
-      if (error.code === 'auth/email-already-in-use' || error.code === 'auth/account-exists-with-different-credential') {
+      const code = error?.code || '';
+      if (code === 'auth/email-already-in-use' || code === 'auth/account-exists-with-different-credential') {
         const existingProf = await apiFetchProfileByEmail(email.trim());
         if (existingProf?.role === 'player') {
           setErrors({ global: 'account already exist as player' });
@@ -404,10 +424,19 @@ export default function Auth({ onLogin }) {
         } else {
           setErrors({ global: 'account already exist' });
         }
-      } else if (error.code === 'auth/invalid-credential') {
+      } else if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
         setErrors({ global: 'Incorrect email or password.' });
+      } else if (code === 'auth/invalid-email') {
+        setErrors({ global: 'Invalid email format. Please enter a valid email address (e.g. name@example.com).' });
+      } else if (code === 'auth/user-disabled') {
+        setErrors({ global: 'This account has been disabled. Please contact support.' });
+      } else if (code === 'auth/too-many-requests') {
+        setErrors({ global: 'Too many attempts. Please wait a moment and try again.' });
+      } else if (code === 'auth/network-request-failed') {
+        setErrors({ global: 'Network error. Please check your internet connection.' });
       } else {
-        setErrors({ global: error.message || 'An error occurred during authentication.' });
+        const msg = (error?.message || '').replace(/^Firebase:\s*Error\s*\((auth\/[^)]+)\)\.?/i, '$1');
+        setErrors({ global: msg || 'An error occurred during authentication.' });
       }
     }
   };
