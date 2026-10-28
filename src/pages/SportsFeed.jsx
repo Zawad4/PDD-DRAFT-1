@@ -17,9 +17,18 @@ import {
   Star,
   Settings,
   X,
-  Sparkles
+  Sparkles,
+  CornerDownRight,
+  Loader2
 } from 'lucide-react';
-import { apiFetchPosts, apiCreatePost, apiLikePost } from '../services/db';
+import { 
+  apiFetchPosts, 
+  apiCreatePost, 
+  apiLikePost,
+  apiFetchPostComments,
+  apiAddPostComment,
+  apiLikePostComment
+} from '../services/db';
 
 const POST_TAGS = [
   { id: 'achievement', label: '🏆 Achievement', color: 'bg-amber-500/10 text-amber-300 border-amber-500/25' },
@@ -38,6 +47,143 @@ export default function SportsFeed({ user }) {
   const [isPosting, setIsPosting] = useState(false);
   const [copiedPostId, setCopiedPostId] = useState(null);
   const [shareToast, setShareToast] = useState('');
+
+  // Comment & replies state per post
+  const [expandedPostComments, setExpandedPostComments] = useState({});
+  const [postComments, setPostComments] = useState({});
+  const [loadingComments, setLoadingComments] = useState({});
+  const [commentInputTexts, setCommentInputTexts] = useState({});
+  const [replyingToMap, setReplyingToMap] = useState({});
+  const [submittingComment, setSubmittingComment] = useState({});
+
+  useEffect(() => {
+    const handleCommentAdded = (e) => {
+      const { postId, totalCount } = e.detail || {};
+      if (postId) {
+        setFeedPosts(prev => prev.map(p => {
+          if (String(p.id) === String(postId)) {
+            return { ...p, comments: totalCount };
+          }
+          return p;
+        }));
+      }
+    };
+    window.addEventListener('turfington_post_comment_added', handleCommentAdded);
+    return () => window.removeEventListener('turfington_post_comment_added', handleCommentAdded);
+  }, []);
+
+  const handleToggleComments = async (postId) => {
+    const isExpanded = !!expandedPostComments[postId];
+    const willExpand = !isExpanded;
+
+    setExpandedPostComments(prev => ({
+      ...prev,
+      [postId]: willExpand
+    }));
+
+    if (willExpand) {
+      setLoadingComments(prev => ({ ...prev, [postId]: true }));
+      try {
+        const comments = await apiFetchPostComments(postId);
+        setPostComments(prev => ({ ...prev, [postId]: comments || [] }));
+      } catch (err) {
+        console.error('Error fetching comments:', err);
+      } finally {
+        setLoadingComments(prev => ({ ...prev, [postId]: false }));
+      }
+    }
+  };
+
+  const handleStartReply = (postId, parentId, author) => {
+    setReplyingToMap(prev => ({
+      ...prev,
+      [postId]: { parentId, author }
+    }));
+  };
+
+  const handleCancelReply = (postId) => {
+    setReplyingToMap(prev => ({
+      ...prev,
+      [postId]: null
+    }));
+  };
+
+  const handleAddComment = async (postId, e) => {
+    e.preventDefault();
+    const text = (commentInputTexts[postId] || '').trim();
+    if (!text || submittingComment[postId]) return;
+
+    setSubmittingComment(prev => ({ ...prev, [postId]: true }));
+
+    const authorName = user?.full_name || user?.name || (user?.role === 'owner' ? 'Venue Owner' : 'Athlete');
+    const avatarUrl = user?.avatar || user?.photoURL || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(authorName)}`;
+    const replyingTo = replyingToMap[postId];
+
+    const commentPayload = {
+      author: authorName,
+      authorId: user?.id || user?.uid || 'usr_anonymous',
+      avatar: avatarUrl,
+      content: text,
+      parentId: replyingTo?.parentId || null,
+      replyToAuthor: replyingTo?.author || null
+    };
+
+    try {
+      const res = await apiAddPostComment(postId, commentPayload);
+      if (res && res.success) {
+        setPostComments(prev => ({
+          ...prev,
+          [postId]: res.comments
+        }));
+        setFeedPosts(prev => prev.map(p => {
+          if (String(p.id) === String(postId)) {
+            return { ...p, comments: res.totalCount };
+          }
+          return p;
+        }));
+        setCommentInputTexts(prev => ({ ...prev, [postId]: '' }));
+        setReplyingToMap(prev => ({ ...prev, [postId]: null }));
+      }
+    } catch (err) {
+      console.error('Failed to submit comment:', err);
+    } finally {
+      setSubmittingComment(prev => ({ ...prev, [postId]: false }));
+    }
+  };
+
+  const handleLikeComment = async (postId, commentId) => {
+    const userId = user?.id || user?.uid || 'usr_anonymous';
+    setPostComments(prev => {
+      const currentList = prev[postId] || [];
+      const toggleItem = (item) => {
+        const likedBy = item.liked_by || [];
+        const isLiked = likedBy.includes(userId);
+        return {
+          ...item,
+          liked_by: isLiked ? likedBy.filter(u => u !== userId) : [...likedBy, userId],
+          likes: isLiked ? Math.max(0, (item.likes || 1) - 1) : (item.likes || 0) + 1
+        };
+      };
+
+      const updated = currentList.map(c => {
+        if (c.id === commentId) return toggleItem(c);
+        if (c.replies && c.replies.length > 0) {
+          return {
+            ...c,
+            replies: c.replies.map(r => r.id === commentId ? toggleItem(r) : r)
+          };
+        }
+        return c;
+      });
+      return { ...prev, [postId]: updated };
+    });
+
+    try {
+      await apiLikePostComment(postId, commentId, userId);
+    } catch (err) {
+      console.error('Error toggling comment like:', err);
+    }
+  };
 
   const handleSharePost = async (post) => {
     const textSnippet = post.content ? `"${post.content.slice(0, 80)}..."` : 'Check out this post on Turfington!';
@@ -338,9 +484,17 @@ export default function SportsFeed({ user }) {
                   <span>{post.likes} Likes</span>
                 </button>
 
-                <button className="flex items-center text-xs space-x-1.5 hover:text-white transition-colors cursor-pointer">
-                  <MessageSquare className="w-4 h-4" />
-                  <span>{post.comments} Comments</span>
+                <button 
+                  type="button"
+                  onClick={() => handleToggleComments(post.id)}
+                  className={`flex items-center text-xs space-x-1.5 transition-all cursor-pointer ${
+                    expandedPostComments[post.id] 
+                      ? 'text-indigo-400 font-bold' 
+                      : 'hover:text-white text-neutral-400'
+                  }`}
+                >
+                  <MessageSquare className={`w-4 h-4 ${expandedPostComments[post.id] ? 'fill-indigo-400/20 text-indigo-400' : ''}`} />
+                  <span>{post.comments || 0} {post.comments === 1 ? 'Comment' : 'Comments'}</span>
                 </button>
 
                 <button 
@@ -364,6 +518,193 @@ export default function SportsFeed({ user }) {
                   )}
                 </button>
               </div>
+
+              {/* Expandable Comments & Replies Section */}
+              <AnimatePresence>
+                {expandedPostComments[post.id] && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.25 }}
+                    className="overflow-hidden mt-4 pt-4 border-t border-white/5 space-y-4"
+                  >
+                    {/* Header */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">
+                          Comments & Replies ({post.comments || 0})
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-neutral-500">Live thread</span>
+                    </div>
+
+                    {/* Comments List */}
+                    <div className="space-y-3.5">
+                      {loadingComments[post.id] ? (
+                        <div className="flex items-center justify-center py-6 text-neutral-400 space-x-2">
+                          <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                          <span className="text-xs">Loading replies & comments...</span>
+                        </div>
+                      ) : (postComments[post.id] || []).length === 0 ? (
+                        <div className="py-6 text-center text-xs text-neutral-500 bg-white/[0.015] rounded-2xl border border-dashed border-white/8">
+                          No comments yet. Be the first to start the conversation!
+                        </div>
+                      ) : (
+                        (postComments[post.id] || []).map((comm) => (
+                          <div key={comm.id} className="space-y-2.5">
+                            {/* Main Comment Item */}
+                            <div className="flex items-start space-x-3">
+                              <img
+                                src={comm.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(comm.author)}`}
+                                alt={comm.author}
+                                className="w-8 h-8 rounded-full object-cover border border-white/10 flex-shrink-0"
+                                onError={e => { e.target.onerror = null; e.target.src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'; }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="bg-white/[0.03] border border-white/8 rounded-2xl px-3.5 py-2.5">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs font-bold text-white font-display truncate">{comm.author}</span>
+                                    <span className="text-[10px] text-neutral-500 flex-shrink-0 ml-2">{comm.time || 'Just now'}</span>
+                                  </div>
+                                  <p className="text-xs text-neutral-300 leading-relaxed break-words font-light">
+                                    {comm.content}
+                                  </p>
+                                </div>
+                                {/* Actions under comment */}
+                                <div className="flex items-center space-x-4 mt-1.5 px-2 text-[11px] text-neutral-400">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleLikeComment(post.id, comm.id)}
+                                    className={`flex items-center space-x-1 transition-colors cursor-pointer ${
+                                      comm.liked_by?.includes(user?.id) ? 'text-rose-400 font-bold' : 'hover:text-rose-400'
+                                    }`}
+                                  >
+                                    <Heart className={`w-3.5 h-3.5 ${comm.liked_by?.includes(user?.id) ? 'fill-rose-500 text-rose-500' : ''}`} />
+                                    <span>{comm.likes || 0}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartReply(post.id, comm.id, comm.author)}
+                                    className="flex items-center space-x-1 hover:text-white transition-colors cursor-pointer font-medium"
+                                  >
+                                    <CornerDownRight className="w-3.5 h-3.5 text-indigo-400" />
+                                    <span>Reply</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Nested Replies */}
+                            {comm.replies && comm.replies.length > 0 && (
+                              <div className="ml-9 space-y-2.5 border-l-2 border-indigo-500/20 pl-3 pt-1">
+                                {comm.replies.map((reply) => (
+                                  <div key={reply.id} className="flex items-start space-x-2.5">
+                                    <img
+                                      src={reply.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(reply.author)}`}
+                                      alt={reply.author}
+                                      className="w-6 h-6 rounded-full object-cover border border-white/10 flex-shrink-0"
+                                      onError={e => { e.target.onerror = null; e.target.src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'; }}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl px-3 py-2">
+                                        <div className="flex items-center justify-between mb-1">
+                                          <div className="flex items-center space-x-1.5 truncate">
+                                            <span className="text-xs font-bold text-white truncate">{reply.author}</span>
+                                            {reply.replyToAuthor && (
+                                              <span className="text-[10px] text-indigo-400 font-semibold bg-indigo-500/10 px-1.5 py-0.5 rounded-full">
+                                                @{reply.replyToAuthor}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <span className="text-[9px] text-neutral-500 flex-shrink-0 ml-2">{reply.time || 'Just now'}</span>
+                                        </div>
+                                        <p className="text-xs text-neutral-300 leading-relaxed break-words font-light">
+                                          {reply.content}
+                                        </p>
+                                      </div>
+                                      {/* Nested reply actions */}
+                                      <div className="flex items-center space-x-4 mt-1 px-2 text-[10px] text-neutral-400">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleLikeComment(post.id, reply.id)}
+                                          className={`flex items-center space-x-1 transition-colors cursor-pointer ${
+                                            reply.liked_by?.includes(user?.id) ? 'text-rose-400 font-bold' : 'hover:text-rose-400'
+                                          }`}
+                                        >
+                                          <Heart className={`w-3 h-3 ${reply.liked_by?.includes(user?.id) ? 'fill-rose-500 text-rose-500' : ''}`} />
+                                          <span>{reply.likes || 0}</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleStartReply(post.id, comm.id, reply.author)}
+                                          className="flex items-center space-x-1 hover:text-white transition-colors cursor-pointer font-medium"
+                                        >
+                                          <CornerDownRight className="w-3 h-3 text-indigo-400" />
+                                          <span>Reply</span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Replying banner indicator */}
+                    {replyingToMap[post.id] && (
+                      <div className="flex items-center justify-between px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs text-indigo-300">
+                        <div className="flex items-center space-x-1.5 truncate">
+                          <CornerDownRight className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                          <span className="truncate">Replying to <strong className="text-indigo-200">@{replyingToMap[post.id].author}</strong></span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleCancelReply(post.id)}
+                          className="text-neutral-400 hover:text-white p-0.5 rounded hover:bg-white/10 transition-colors cursor-pointer"
+                          title="Cancel reply"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Write Comment Form */}
+                    <form onSubmit={(e) => handleAddComment(post.id, e)} className="flex items-center space-x-2 pt-1">
+                      <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                        {(user?.full_name || user?.name)?.[0]?.toUpperCase() || 'A'}
+                      </div>
+                      <input
+                        type="text"
+                        value={commentInputTexts[post.id] || ''}
+                        onChange={(e) => setCommentInputTexts(prev => ({ ...prev, [post.id]: e.target.value }))}
+                        placeholder={
+                          replyingToMap[post.id]
+                            ? `Write reply to @${replyingToMap[post.id].author}...`
+                            : "Write a reply or comment..."
+                        }
+                        className="flex-1 bg-white/[0.04] border border-white/8 focus:border-indigo-500/50 rounded-full px-4 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none transition-colors"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!commentInputTexts[post.id]?.trim() || submittingComment[post.id]}
+                        className="px-4 py-2 bg-[#5842fe] hover:bg-[#4832ee] text-white text-xs font-bold rounded-full transition-all flex items-center space-x-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:scale-102 flex-shrink-0 shadow-[0_0_12px_rgba(88,66,254,0.3)]"
+                      >
+                        {submittingComment[post.id] ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Send className="w-3.5 h-3.5" />
+                        )}
+                        <span className="hidden sm:inline">Reply</span>
+                      </button>
+                    </form>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           ))}
         </div>

@@ -79,9 +79,11 @@ export default function Marketplace({
 
   const isItemOwner = (p) => {
     if (!p) return false;
-    const currentUserId = user?.id || user?.username || 'usr_me';
-    const currentUserName = user?.full_name || 'You';
+    const currentUserId = user?.id || user?.uid || user?.username || 'usr_me';
+    const currentUserName = user?.full_name || user?.name || 'You';
     return (
+      (user?.id && p.seller_id === user.id) ||
+      (user?.uid && p.seller_id === user.uid) ||
       p.seller_id === currentUserId ||
       p.seller_id === 'usr_me' ||
       p.sellerName === 'You' ||
@@ -141,9 +143,9 @@ export default function Marketplace({
       price: parseFloat(itemPrice),
       condition: itemCondition,
       description: itemDesc,
-      seller_id: user?.id || 'usr_me',
-      sellerName: user?.full_name || 'You',
-      sellerAvatar: user?.avatar_url || user?.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=You',
+      seller_id: user?.id || user?.uid || 'usr_me',
+      sellerName: user?.full_name || user?.name || user?.username || 'You',
+      sellerAvatar: user?.avatar_url || user?.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(user?.full_name || user?.name || 'Athlete')}`,
       isMine: true
     };
 
@@ -253,41 +255,6 @@ export default function Marketplace({
       {/* 2. MAIN WORKSPACE VIEW */}
       {activeSection === 'browse' ? (
         <>
-          {/* BANNER PROMO */}
-          <div className="glass-card mb-12 p-8 md:p-12 relative overflow-hidden flex flex-col md:flex-row items-center justify-between border border-white/5">
-            <div className="text-left space-y-4 max-w-lg z-10">
-              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[9px] uppercase font-bold tracking-widest text-indigo-400">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>COMMUNITY EXCLUSIVES</span>
-              </span>
-              <h2 className="text-3xl md:text-5xl font-black font-display tracking-tight leading-tight">
-                Stealth Pro<br />
-                <span className="chrome-text">Aero Shoes</span>
-              </h2>
-              <p className="text-neutral-400 font-light text-sm max-w-sm leading-relaxed">
-                Listed by Deepak Kumar. Excellent condition pre-owned shoes with professional carbon plate inserts.
-              </p>
-              <button 
-                onClick={() => onContactSeller(productsList[2])}
-                className="group inline-flex items-center justify-center px-6 py-3.5 bg-white text-black text-xs font-bold rounded-full hover:scale-102 transition-transform duration-300 cursor-pointer"
-              >
-                <span>Chat to Pre-order</span>
-                <MessageSquare className="ml-2 w-3.5 h-3.5 text-black" />
-              </button>
-            </div>
-
-            <div className="relative mt-8 md:mt-0 w-[260px] h-[200px] flex items-center justify-center z-10">
-              <img 
-                src="https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=400" 
-                alt="Sneaker" 
-                className="w-full h-full object-cover rounded-2xl border border-white/10"
-              />
-              <div className="absolute inset-0 bg-gradient-to-tr from-black/40 via-transparent to-transparent pointer-events-none" />
-            </div>
-            
-            <div className="absolute right-0 bottom-0 top-0 w-1/2 bg-indigo-500/[0.01] rounded-l-full blur-3xl pointer-events-none" />
-          </div>
-
           {/* CATEGORIES NAVIGATION */}
           <div className="flex space-x-2.5 overflow-x-auto no-scrollbar pb-6 mb-8 max-w-full">
             {categories.map(c => (
@@ -306,8 +273,27 @@ export default function Marketplace({
           </div>
 
           {/* PRODUCTS GRID */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-            {filteredProducts.map(p => {
+          {filteredProducts.length === 0 ? (
+            <div className="glass-card p-12 text-center border border-white/5 rounded-3xl max-w-lg mx-auto my-8 space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto text-2xl">
+                🛍️
+              </div>
+              <h3 className="text-xl font-bold font-display text-white">No Gear Listed Yet</h3>
+              <p className="text-xs text-neutral-400 font-light max-w-sm mx-auto leading-relaxed">
+                Only gear uploaded by verified athletes and members appears here. Have equipment, shoes, or sports apparel to sell?
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveSection('sell')}
+                className="inline-flex items-center space-x-2 px-6 py-3 bg-white hover:bg-neutral-200 text-black text-xs font-extrabold rounded-full transition-all cursor-pointer hover:scale-105 shadow-lg"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>List Your Gear</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+              {filteredProducts.map(p => {
               const isLiked = likedProducts.includes(p.id);
               const tagColors = getTagColors(p.tag || p.condition);
               const isMine = isItemOwner(p);
@@ -464,6 +450,7 @@ export default function Marketplace({
               );
             })}
           </div>
+        )}
         </>
       ) : (
         /* SELL GEAR DASHBOARD FORM */

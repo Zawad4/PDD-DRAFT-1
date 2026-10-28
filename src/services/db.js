@@ -1218,7 +1218,8 @@ export const DEFAULT_COMMUNITY_GROUPS = [
     sport: 'Bowling',
     type: 'group',
     is_public: true,
-    avatar: 'https://images.unsplash.com/photo-1545232979-fbf68fe9b10d?q=80&w=600',
+    avatar: '/bowling_group.jpg',
+    imageUrl: '/bowling_group.jpg',
     description: '10-pin bowling nights, high score leaderboards, and weekend squad socials.',
     participants: ['turfington_official'],
     members_count: 22,
@@ -3020,81 +3021,52 @@ export async function apiLikePost(postId, userId) {
   return { success: true };
 }
 
-const INITIAL_MARKETPLACE_ITEMS = [
-  {
-    id: 'mp_1',
-    name: 'Stealth Pro Aero Shoes',
-    category: 'Shoes',
-    image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=400',
-    price: 3499,
-    tag: 'Pre-owned (Like New)',
-    condition: 'Pre-owned (Like New)',
-    description: 'Pre-owned athletic shoes with professional carbon plate inserts. Excellent grip for synthetic turf.',
-    sellerName: 'Deepak Kumar',
-    sellerAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'mp_2',
-    name: 'English Willow Bat (Grade 1)',
-    category: 'Equipment',
-    image: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?q=80&w=400',
-    price: 4999,
-    tag: 'New (Sealed Pack)',
-    condition: 'New (Sealed Pack)',
-    description: 'Professional grade 1 English Willow cricket bat with chevron grip and protective toe guard.',
-    sellerName: 'Amit Patel',
-    sellerAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'mp_3',
-    name: 'Yonex Arcsaber 11 Pro Racket',
-    category: 'Rackets',
-    image: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=400',
-    price: 2800,
-    tag: 'Pre-owned (Good)',
-    condition: 'Pre-owned (Good)',
-    description: 'Even balance badminton racket strung with BG80 Power at 26 lbs. Minor scuffs on frame.',
-    sellerName: 'Pooja Reddy',
-    sellerAvatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200',
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'mp_4',
-    name: 'Official FIFA Match Football',
-    category: 'Equipment',
-    image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=400',
-    price: 1200,
-    tag: 'New (Sealed Pack)',
-    condition: 'New (Sealed Pack)',
-    description: 'Thermally bonded seamless surface match ball. Includes pump and ball net.',
-    sellerName: 'Rahul Sharma',
-    sellerAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Rahul',
-    created_at: new Date().toISOString()
-  }
-];
+const INITIAL_MARKETPLACE_ITEMS = [];
 
 export async function apiFetchMarketplaceItems() {
   let localItems = [];
   try {
     const s = localStorage.getItem('turfington_marketplace_items');
-    localItems = s ? JSON.parse(s) : INITIAL_MARKETPLACE_ITEMS;
+    localItems = s ? JSON.parse(s) : [];
   } catch {
-    localItems = INITIAL_MARKETPLACE_ITEMS;
+    localItems = [];
   }
+
+  // Purge any legacy mock items so only authentic items uploaded by users remain
+  localItems = localItems.filter(item => 
+    item &&
+    !['mp_1', 'mp_2', 'mp_3', 'mp_4'].includes(item.id) &&
+    item.sellerName !== 'Deepak Kumar' &&
+    item.sellerName !== 'Amit Patel' &&
+    item.sellerName !== 'Pooja Reddy' &&
+    item.sellerName !== 'Rahul Sharma'
+  );
 
   try {
     const snap = await getDocs(collection(db, 'marketplace_items'));
     if (!snap.empty) {
       const dbItems = snap.docs.map(item => ({ id: item.id, ...item.data() }));
+      const cleanDbItems = dbItems.filter(item => 
+        item &&
+        !['mp_1', 'mp_2', 'mp_3', 'mp_4'].includes(item.id) &&
+        item.sellerName !== 'Deepak Kumar' &&
+        item.sellerName !== 'Amit Patel' &&
+        item.sellerName !== 'Pooja Reddy' &&
+        item.sellerName !== 'Rahul Sharma'
+      );
       const map = new Map();
-      [...dbItems, ...localItems].forEach(item => map.set(item.id, item));
+      [...cleanDbItems, ...localItems].forEach(item => map.set(item.id, item));
       const merged = Array.from(map.values());
-      localStorage.setItem('turfington_marketplace_items', JSON.stringify(merged));
+      try {
+        localStorage.setItem('turfington_marketplace_items', JSON.stringify(merged));
+      } catch {}
       return merged;
     }
   } catch (err) {}
+
+  try {
+    localStorage.setItem('turfington_marketplace_items', JSON.stringify(localItems));
+  } catch {}
 
   return localItems;
 }
@@ -3110,20 +3082,27 @@ export async function apiCreateMarketplaceItem(itemData) {
     description: itemData.description,
     image: itemData.image_url || itemData.image || 'https://images.unsplash.com/photo-1511067007398-7e4b90cfa4bc?q=80&w=400',
     seller_id: itemData.seller_id || 'usr_me',
-    sellerName: itemData.sellerName || 'You',
-    sellerAvatar: itemData.sellerAvatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=You',
+    sellerName: itemData.sellerName || 'Community Athlete',
+    sellerAvatar: itemData.sellerAvatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Athlete',
+    isUserCreated: true,
     created_at: new Date().toISOString()
   };
 
   try {
     const existingStr = localStorage.getItem('turfington_marketplace_items');
-    const existing = existingStr ? JSON.parse(existingStr) : INITIAL_MARKETPLACE_ITEMS;
-    const updated = [newItem, ...existing];
+    const existing = existingStr ? JSON.parse(existingStr) : [];
+    const cleanExisting = existing.filter(item => 
+      item &&
+      !['mp_1', 'mp_2', 'mp_3', 'mp_4'].includes(item.id) &&
+      item.sellerName !== 'Deepak Kumar'
+    );
+    const updated = [newItem, ...cleanExisting];
     localStorage.setItem('turfington_marketplace_items', JSON.stringify(updated));
   } catch {}
 
   addDoc(collection(db, 'marketplace_items'), {
     ...itemData,
+    ...newItem,
     createdAt: serverTimestamp()
   }).catch(() => {});
 
@@ -3133,7 +3112,7 @@ export async function apiCreateMarketplaceItem(itemData) {
 export async function apiUpdateMarketplaceItem(itemId, updatedData) {
   try {
     const existingStr = localStorage.getItem('turfington_marketplace_items');
-    const existing = existingStr ? JSON.parse(existingStr) : INITIAL_MARKETPLACE_ITEMS;
+    const existing = existingStr ? JSON.parse(existingStr) : [];
     const updated = existing.map(item => item.id === itemId ? { ...item, ...updatedData } : item);
     localStorage.setItem('turfington_marketplace_items', JSON.stringify(updated));
   } catch {}
@@ -3147,7 +3126,7 @@ export async function apiUpdateMarketplaceItem(itemId, updatedData) {
 export async function apiDeleteMarketplaceItem(itemId) {
   try {
     const existingStr = localStorage.getItem('turfington_marketplace_items');
-    const existing = existingStr ? JSON.parse(existingStr) : INITIAL_MARKETPLACE_ITEMS;
+    const existing = existingStr ? JSON.parse(existingStr) : [];
     const updated = existing.filter(item => item.id !== itemId);
     localStorage.setItem('turfington_marketplace_items', JSON.stringify(updated));
   } catch {}
@@ -3531,4 +3510,232 @@ export async function apiLeaveHostedMatch(matchId, userId) {
   } catch {}
 
   return { success: true };
+}
+
+
+// ============================================================================
+// POST COMMENTS & REPLIES SERVICES
+// ============================================================================
+
+export const DEFAULT_POST_COMMENTS = {
+  post_501: [
+    {
+      id: 'comm_501_1',
+      postId: 'post_501',
+      author: 'Karthik Raja',
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100',
+      content: 'Incredible batting display! What was the final score in the last over?',
+      time: '3 hours ago',
+      createdAt: new Date(Date.now() - 3600 * 3000).toISOString(),
+      likes: 4,
+      liked_by: [],
+      replies: [
+        {
+          id: 'comm_501_1_r1',
+          postId: 'post_501',
+          author: 'Tamil Nadu Box Cricket Club',
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
+          content: 'We needed 14 off the last over and finished it with 2 balls to spare!',
+          time: '2 hours ago',
+          createdAt: new Date(Date.now() - 3600 * 2000).toISOString(),
+          likes: 3,
+          liked_by: [],
+          parentId: 'comm_501_1',
+          replyToAuthor: 'Karthik Raja'
+        }
+      ]
+    },
+    {
+      id: 'comm_501_2',
+      postId: 'post_501',
+      author: 'Suresh Kumar',
+      avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100',
+      content: 'Are you guys organizing another championship next month?',
+      time: '1 hour ago',
+      createdAt: new Date(Date.now() - 3600 * 1000).toISOString(),
+      likes: 1,
+      liked_by: [],
+      replies: []
+    }
+  ],
+  post_502: [
+    {
+      id: 'comm_502_1',
+      postId: 'post_502',
+      author: 'Rohan Sharma',
+      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100',
+      content: 'Is the floodlit football slot open for this Saturday night after 10 PM?',
+      time: '2 hours ago',
+      createdAt: new Date(Date.now() - 3600 * 2000).toISOString(),
+      likes: 2,
+      liked_by: [],
+      replies: [
+        {
+          id: 'comm_502_1_r1',
+          postId: 'post_502',
+          author: 'Vanguard Sports Arena',
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
+          content: 'Yes Rohan! 10-11 PM slot is available. You can book directly in Venues tab with the flat 15% discount!',
+          time: '1 hour ago',
+          createdAt: new Date(Date.now() - 3600 * 1000).toISOString(),
+          likes: 2,
+          liked_by: [],
+          parentId: 'comm_502_1',
+          replyToAuthor: 'Rohan Sharma'
+        }
+      ]
+    }
+  ]
+};
+
+export async function apiFetchPostComments(postId) {
+  if (!postId) return [];
+  try {
+    const key = `turfington_post_comments_${postId}`;
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) return list;
+    }
+  } catch (e) {}
+
+  if (DEFAULT_POST_COMMENTS[postId]) {
+    try {
+      localStorage.setItem(`turfington_post_comments_${postId}`, JSON.stringify(DEFAULT_POST_COMMENTS[postId]));
+    } catch (e) {}
+    return DEFAULT_POST_COMMENTS[postId];
+  }
+  return [];
+}
+
+export async function apiAddPostComment(postId, commentData) {
+  if (!postId || !commentData || !commentData.content?.trim()) {
+    return { success: false, error: 'Content required' };
+  }
+
+  const nowIso = new Date().toISOString();
+  const commentId = `comm_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  
+  const newComment = {
+    id: commentId,
+    postId,
+    author: commentData.author || 'Athlete',
+    authorId: commentData.authorId || commentData.userId || 'usr_anonymous',
+    avatar: commentData.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(commentData.author || 'User')}`,
+    content: commentData.content.trim(),
+    time: 'Just now',
+    createdAt: nowIso,
+    likes: 0,
+    liked_by: [],
+    parentId: commentData.parentId || null,
+    replyToAuthor: commentData.replyToAuthor || null,
+    replies: []
+  };
+
+  const key = `turfington_post_comments_${postId}`;
+  const existing = await apiFetchPostComments(postId);
+
+  let updatedList = [];
+  if (newComment.parentId) {
+    let added = false;
+    updatedList = existing.map(c => {
+      if (c.id === newComment.parentId) {
+        added = true;
+        return {
+          ...c,
+          replies: [...(c.replies || []), newComment]
+        };
+      }
+      return c;
+    });
+    if (!added) {
+      // If parentId is a nested reply, attach to that root comment thread
+      updatedList = existing.map(c => {
+        if (c.replies && c.replies.some(r => r.id === newComment.parentId)) {
+          added = true;
+          return {
+            ...c,
+            replies: [...(c.replies || []), newComment]
+          };
+        }
+        return c;
+      });
+    }
+    if (!added) {
+      updatedList = [...existing, newComment];
+    }
+  } else {
+    updatedList = [...existing, newComment];
+  }
+
+  const totalCount = updatedList.reduce((acc, c) => acc + 1 + (c.replies ? c.replies.length : 0), 0);
+
+  try {
+    localStorage.setItem(key, JSON.stringify(updatedList));
+  } catch (e) {}
+
+  try {
+    const postsRaw = localStorage.getItem('turfington_feed_posts');
+    if (postsRaw) {
+      const posts = JSON.parse(postsRaw);
+      const updatedPosts = posts.map(p => {
+        if (String(p.id) === String(postId)) {
+          return {
+            ...p,
+            comments: totalCount,
+            commentsCount: totalCount
+          };
+        }
+        return p;
+      });
+      localStorage.setItem('turfington_feed_posts', JSON.stringify(updatedPosts));
+    }
+  } catch (e) {}
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('turfington_post_comment_added', {
+      detail: { postId, comment: newComment, totalCount }
+    }));
+  }
+
+  try {
+    addDoc(collection(db, 'posts', postId, 'comments'), {
+      ...newComment,
+      createdAt: serverTimestamp()
+    }).catch(() => {});
+  } catch (e) {}
+
+  return { success: true, comment: newComment, totalCount, comments: updatedList };
+}
+
+export async function apiLikePostComment(postId, commentId, userId) {
+  if (!postId || !commentId) return { success: false };
+  const existing = await apiFetchPostComments(postId);
+  
+  const toggleLike = (item) => {
+    const likedBy = item.liked_by || [];
+    const isLiked = likedBy.includes(userId);
+    const newLikedBy = isLiked ? likedBy.filter(u => u !== userId) : [...likedBy, userId];
+    const newLikes = isLiked ? Math.max(0, (item.likes || 1) - 1) : (item.likes || 0) + 1;
+    return { ...item, liked_by: newLikedBy, likes: newLikes };
+  };
+
+  const updatedList = existing.map(c => {
+    if (c.id === commentId) {
+      return toggleLike(c);
+    }
+    if (c.replies && c.replies.length > 0) {
+      return {
+        ...c,
+        replies: c.replies.map(r => r.id === commentId ? toggleLike(r) : r)
+      };
+    }
+    return c;
+  });
+
+  try {
+    localStorage.setItem(`turfington_post_comments_${postId}`, JSON.stringify(updatedList));
+  } catch (e) {}
+
+  return { success: true, comments: updatedList };
 }
