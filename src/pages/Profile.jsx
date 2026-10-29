@@ -128,8 +128,8 @@ function PfpCropModal({ imageSrc, onClose, onConfirm }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div onClick={onClose} className="absolute inset-0 bg-black/85 backdrop-blur-md" />
-      <div className="relative glass-card border border-white/10 rounded-3xl p-6 max-w-sm w-full z-10 text-center space-y-5 shadow-2xl">
+      <div onClick={onClose} className="fixed inset-0 bg-black/90 backdrop-blur-2xl" />
+      <div className="relative bg-[#111116] border border-white/15 rounded-3xl p-6 max-w-sm w-full z-10 text-center space-y-5 shadow-[0_25px_80px_rgba(0,0,0,0.95)]">
         <div className="flex items-center justify-between border-b border-white/10 pb-3">
           <div className="text-left">
             <h3 className="font-display font-extrabold text-white text-base">Crop Profile Picture</h3>
@@ -928,11 +928,11 @@ export default function Profile({
       <AnimatePresence>
         {isSettingsOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.8 }} exit={{ opacity: 0 }}
-              onClick={() => setIsSettingsOpen(false)} className="absolute inset-0 bg-black/85 backdrop-blur-md" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setIsSettingsOpen(false)} className="fixed inset-0 bg-black/90 backdrop-blur-2xl" />
             
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 15 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="relative glass-card border border-white/10 rounded-3xl p-6 max-w-md w-full z-10 text-left space-y-6 shadow-2xl">
+              className="relative bg-[#111116] border border-white/15 rounded-3xl p-6 max-w-md w-full z-10 text-left space-y-6 shadow-[0_25px_80px_rgba(0,0,0,0.95)]">
               
               <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <div>
@@ -1084,11 +1084,11 @@ export default function Profile({
       <AnimatePresence>
         {showDeleteConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.8 }} exit={{ opacity: 0 }}
-              onClick={() => setShowDeleteConfirm(false)} className="absolute inset-0 bg-black/85 backdrop-blur-md" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowDeleteConfirm(false)} className="fixed inset-0 bg-black/90 backdrop-blur-2xl" />
             
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 15 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="relative glass-card border border-rose-500/30 rounded-3xl p-6 max-w-md w-full z-10 text-left space-y-4 shadow-2xl">
+              className="relative bg-[#111116] border border-rose-500/40 rounded-3xl p-6 max-w-md w-full z-10 text-left space-y-4 shadow-[0_25px_80px_rgba(0,0,0,0.95)]">
               
               <div className="flex items-center space-x-3 pb-3 border-b border-white/10">
                 <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-full text-rose-400">

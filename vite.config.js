@@ -9,6 +9,7 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
+    host: true,
     watch: {
       ignored: ['**/turfington_db.json', '**/turfington_db*.json', '**/server.js', '**/*.json']
     }

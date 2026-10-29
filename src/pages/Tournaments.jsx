@@ -128,15 +128,35 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
   const [step, setStep] = useState('form'); // 'form' | 'verify' | 'payment' | 'processing' | 'success'
 
   // Prefill user details if available
+  const profileName = user?.full_name || user?.name || user?.displayName || (user?.email ? user.email.split('@')[0] : '');
+  const profilePhone = user?.phone || user?.phoneNumber || '';
+  const profileEmail = user?.email || '';
+
   const [formData, setFormData] = useState({
-    teamName: user?.name ? `${user.name}'s Squad` : '',
-    captainName: user?.name || '',
-    phone: user?.phone || '',
-    email: user?.email || '',
+    teamName: profileName ? `${profileName}'s Squad` : '',
+    captainName: profileName,
+    phone: profilePhone,
+    email: profileEmail,
     category: 'Open Division',
-    roster: user?.name ? `${user.name} (Captain)` : '',
+    roster: profileName ? `${profileName} (Captain)` : '',
     acceptRules: false,
   });
+
+  useEffect(() => {
+    if (user) {
+      const uName = user.full_name || user.name || user.displayName || (user.email ? user.email.split('@')[0] : '');
+      const uPhone = user.phone || user.phoneNumber || '';
+      const uEmail = user.email || '';
+      setFormData(prev => ({
+        ...prev,
+        teamName: prev.teamName || (uName ? `${uName}'s Squad` : ''),
+        captainName: prev.captainName || uName,
+        phone: prev.phone || uPhone,
+        email: prev.email || uEmail,
+        roster: prev.roster || (uName ? `${uName} (Captain)` : '')
+      }));
+    }
+  }, [user]);
 
   const [paymentMethod, setPaymentMethod] = useState('upi'); // 'upi' | 'card' | 'netbanking'
   const [upiId, setUpiId] = useState('player@upi');
@@ -182,13 +202,13 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto pt-10 pb-10">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.7 }} exit={{ opacity: 0 }}
-        onClick={onClose} className="absolute inset-0 bg-black/80 backdrop-blur-md" />
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/90 backdrop-blur-2xl" />
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        className="relative glass-card w-full max-w-[540px] p-6 sm:p-8 border border-white/10 shadow-2xl z-10 text-left my-auto rounded-3xl"
+        className="relative bg-[#111116] border border-white/15 shadow-[0_25px_80px_rgba(0,0,0,0.95)] w-full max-w-[540px] p-6 sm:p-8 z-10 text-left my-auto rounded-3xl"
       >
         <button onClick={onClose} className="absolute top-5 right-5 p-2 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-neutral-400 hover:text-white transition-all">
           <X className="w-4 h-4" />
@@ -238,7 +258,7 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
         {/* ── STEP 1: REGISTRATION FORM ───────────────────── */}
         {step === 'form' && (
           <form onSubmit={handleValidateForm} className="space-y-4">
-            <div className="bg-indigo-500/5 border border-indigo-500/15 rounded-2xl p-4 mb-2">
+            <div className="bg-indigo-950/40 border border-indigo-500/25 rounded-2xl p-4 mb-2">
               <p className="text-xs text-neutral-300 flex items-start gap-2">
                 <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
                 <span>Fill in your squad/player details accurately. Details will be verified before match allocation.</span>
@@ -252,7 +272,7 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
                 value={formData.teamName}
                 onChange={e => setFormData({ ...formData, teamName: e.target.value })}
                 placeholder="e.g. Phoenix Strikers FC"
-                className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                className="w-full bg-[#181822] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
               />
               {errors.teamName && <p className="text-rose-400 text-[11px] mt-1">{errors.teamName}</p>}
             </div>
@@ -265,7 +285,7 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
                   value={formData.captainName}
                   onChange={e => setFormData({ ...formData, captainName: e.target.value })}
                   placeholder="Full Name"
-                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#181822] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
                 />
                 {errors.captainName && <p className="text-rose-400 text-[11px] mt-1">{errors.captainName}</p>}
               </div>
@@ -275,7 +295,7 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
                 <select
                   value={formData.category}
                   onChange={e => setFormData({ ...formData, category: e.target.value })}
-                  className="w-full bg-neutral-900 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#181822] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
                 >
                   <option value="Open Division">Open Division</option>
                   <option value="Amateur Level">Amateur Level</option>
@@ -293,7 +313,7 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
                   value={formData.phone}
                   onChange={e => setFormData({ ...formData, phone: e.target.value })}
                   placeholder="+91 9876543210"
-                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#181822] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
                 />
                 {errors.phone && <p className="text-rose-400 text-[11px] mt-1">{errors.phone}</p>}
               </div>
@@ -305,7 +325,7 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
                   value={formData.email}
                   onChange={e => setFormData({ ...formData, email: e.target.value })}
                   placeholder="captain@example.com"
-                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#181822] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
                 />
                 {errors.email && <p className="text-rose-400 text-[11px] mt-1">{errors.email}</p>}
               </div>
@@ -318,7 +338,7 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
                 value={formData.roster}
                 onChange={e => setFormData({ ...formData, roster: e.target.value })}
                 placeholder="List players (e.g. Rahul S, Danish K, Amit P, Vignesh M)"
-                className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                className="w-full bg-[#181822] border border-white/10 rounded-xl px-4 py-2 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
               />
             </div>
 
@@ -348,7 +368,7 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
         {/* ── STEP 2: VERIFICATION SUMMARY ───────────────────── */}
         {step === 'verify' && (
           <div className="space-y-5">
-            <div className="bg-neutral-900/80 border border-white/10 rounded-2xl p-5 space-y-4">
+            <div className="bg-[#181822] border border-white/10 rounded-2xl p-5 space-y-4">
               <div className="flex justify-between items-center pb-3 border-b border-white/10">
                 <span className="text-xs text-neutral-400 uppercase tracking-wider font-extrabold">Verification Summary</span>
                 <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full font-bold">
@@ -378,12 +398,12 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
               {formData.roster && (
                 <div className="pt-2 border-t border-white/5 text-xs">
                   <span className="text-neutral-500 block text-[10px] uppercase font-bold mb-1">Squad Roster</span>
-                  <p className="text-neutral-300 bg-white/[0.02] p-2.5 rounded-xl border border-white/5">{formData.roster}</p>
+                  <p className="text-neutral-300 bg-[#12121a] p-2.5 rounded-xl border border-white/5">{formData.roster}</p>
                 </div>
               )}
 
               {/* Fee breakdown */}
-              <div className="bg-black/40 rounded-xl p-3.5 space-y-2 text-xs border border-white/5">
+              <div className="bg-[#12121a] rounded-xl p-3.5 space-y-2 text-xs border border-white/5">
                 <div className="flex justify-between"><span className="text-neutral-400">Tournament Entry Fee</span><span className="text-white font-bold">₹{numericFee}</span></div>
                 <div className="flex justify-between"><span className="text-neutral-400">GST (18%)</span><span className="text-white font-bold">₹{gst}</span></div>
                 <div className="h-px bg-white/10 my-1" />
@@ -421,7 +441,7 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
               </div>
             </div>
 
-            <div className="bg-neutral-900/80 border border-white/10 rounded-2xl p-4">
+            <div className="bg-[#181822] border border-white/10 rounded-2xl p-4">
               <div className="flex justify-between items-center mb-3">
                 <div>
                   <span className="text-xs text-neutral-400 font-bold uppercase tracking-wider block">Prepaid Payment Method</span>
@@ -595,15 +615,15 @@ function CreateTournamentForm({ onClose, onCreated }) {
     onClose();
   };
 
-  const inputClass = "w-full bg-white/[0.03] border border-white/8 rounded-xl px-4 py-3 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-indigo-500/50 transition-colors";
+  const inputClass = "w-full bg-[#181822] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-indigo-500/50 transition-colors";
   const labelClass = "text-[10px] text-neutral-400 uppercase tracking-widest font-bold mb-1.5 block";
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-20 overflow-y-auto">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.7 }} exit={{ opacity: 0 }}
-        onClick={onClose} className="absolute inset-0 bg-black" />
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="fixed inset-0 bg-black/90 backdrop-blur-2xl" />
       <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}
-        className="relative glass-card w-full max-w-[560px] border border-white/10 shadow-2xl z-10 text-left mb-8">
+        className="relative bg-[#111116] w-full max-w-[560px] border border-white/15 shadow-[0_25px_80px_rgba(0,0,0,0.95)] z-10 text-left mb-8 rounded-3xl overflow-hidden">
 
         <div className="p-6 border-b border-white/5 flex items-center justify-between">
           <div>

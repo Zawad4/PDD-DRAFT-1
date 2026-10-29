@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "expo": "npm --prefix sports-mobile-shell start",
+    "expo:android": "npm --prefix sports-mobile-shell run android",
+    "expo:ios": "npm --prefix sports-mobile-shell run ios",
     "build": "vite build",
     "cap:build": "vite build && npx cap sync",
     "cap:android": "npx cap open android",
