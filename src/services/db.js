@@ -701,7 +701,7 @@ export async function apiDeleteAccount(userOrIdentifier, confirmPassword = null)
           try {
             const idToken = await auth.currentUser.getIdToken(true).catch(() => null);
             if (idToken) {
-              const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=AIzaSyBJse-qZuxrbKM51ze5HQaw31CitPsdV5o`, {
+              const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${(typeof import.meta !== 'undefined' && import.meta.env?.VITE_FIREBASE_API_KEY) || ''}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ idToken })

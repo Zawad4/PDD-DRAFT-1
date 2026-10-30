@@ -18,6 +18,89 @@ app.use(express.urlencoded({ limit: '20mb', extended: true }));
 // Database file path
 const DB_FILE = path.join(__dirname, 'turfington_db.json');
 
+// ── Security Headers & Transport Hardening ──
+app.use((req, res, next) => {
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Content-Security-Policy', "upgrade-insecure-requests");
+  next();
+});
+
+// ── Bad Input Sanitization Middleware ──
+app.use((req, res, next) => {
+  if (req.body && typeof req.body === 'object') {
+    const sanitizeVal = (val) => {
+      if (typeof val === 'string') {
+        return val.replace(/\0/g, '').replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '').trim();
+      }
+      if (Array.isArray(val)) {
+        return val.map(sanitizeVal);
+      }
+      if (val !== null && typeof val === 'object') {
+        const cleaned = {};
+        for (const k of Object.keys(val)) {
+          cleaned[k] = sanitizeVal(val[k]);
+        }
+        return cleaned;
+      }
+      return val;
+    };
+    req.body = sanitizeVal(req.body);
+  }
+  next();
+});
+
+// ── Rate Limiter for Auth / OTP to Stop Login Spam ──
+const authRateLimits = new Map();
+function authRateLimiter(req, res, next) {
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown-ip';
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000; // 15 mins
+  const maxAttempts = 10;
+
+  const userAttempts = authRateLimits.get(ip) || [];
+  const validAttempts = userAttempts.filter(t => now - t < windowMs);
+
+  if (validAttempts.length >= maxAttempts) {
+    return res.status(429).json({
+      success: false,
+      error: 'Too many authentication attempts. Please try again after 15 minutes.'
+    });
+  }
+
+  validAttempts.push(now);
+  authRateLimits.set(ip, validAttempts);
+  next();
+}
+
+// ── Automated Daily Database Backup ──
+const BACKUP_DIR = path.join(__dirname, 'backups');
+if (!fs.existsSync(BACKUP_DIR)) {
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  } catch (err) {
+    console.error('Could not create backups directory:', err.message);
+  }
+}
+
+function performDailyBackup() {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const backupFile = path.join(BACKUP_DIR, `turfington_db_${today}.json`);
+    if (fs.existsSync(DB_FILE) && !fs.existsSync(backupFile)) {
+      fs.copyFileSync(DB_FILE, backupFile);
+      console.log(`[SECURITY BACKUP] Daily database backup created: turfington_db_${today}.json`);
+    }
+  } catch (err) {
+    console.error('[SECURITY BACKUP ERROR]', err.message);
+  }
+}
+performDailyBackup();
+setInterval(performDailyBackup, 24 * 60 * 60 * 1000);
+
 // Helper to calculate distance (Haversine formula in KM)
 function calculateDistance(lat1, lon1, lat2, lon2) {
   if (!lat1 || !lon1 || !lat2 || !lon2) return null;
@@ -601,8 +684,8 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', database: 'connected', time: new Date().toISOString() });
 });
 
-// 2. OTP Generation (Mobile & Email)
-app.post('/api/auth/send-otp', (req, res) => {
+// 2. OTP Generation (Mobile & Email) with Rate Limiting
+app.post('/api/auth/send-otp', authRateLimiter, (req, res) => {
   const { target, type } = req.body;
   if (!target) {
     return res.status(400).json({ success: false, error: 'Email or Mobile number is required' });
@@ -624,7 +707,7 @@ app.post('/api/auth/send-otp', (req, res) => {
   });
   writeDB(db);
 
-  console.log(`[SECURE DISPATCH] Target: ${target} | Passcode: ${otpCode} | Sent via: ${target.includes('@') ? 'Gmail/Email' : 'Mobile SMS'}`);
+  console.log(`[SECURE DISPATCH] Target: ${target} | Sent via: ${target.includes('@') ? 'Gmail/Email' : 'Mobile SMS'}`);
 
   // Fast2SMS Carrier SMS Dispatch Integration (If FAST2SMS_API_KEY is configured in env)
   if (!target.includes('@') && process.env.FAST2SMS_API_KEY) {
@@ -644,13 +727,12 @@ app.post('/api/auth/send-otp', (req, res) => {
     message: target.includes('@') 
       ? `A 6-digit security code has been sent to your Email (${target}).` 
       : `A 6-digit security code has been sent via SMS to ${target}.`,
-    devPasscode: otpCode,
     expiresInSeconds: 300
   });
 });
 
-// 3. Strict Actual OTP Verification (No Demo Bypass)
-app.post('/api/auth/verify-otp', (req, res) => {
+// 3. Strict Actual OTP Verification with Rate Limiting
+app.post('/api/auth/verify-otp', authRateLimiter, (req, res) => {
   const { target, otp, name, role, address, city } = req.body;
   if (!target || !otp) {
     return res.status(400).json({ success: false, error: 'Target and OTP are required' });
@@ -818,16 +900,19 @@ app.delete('/api/venues/:id', (req, res) => {
   res.json({ success: true, message: 'Venue deleted' });
 });
 
-// 6. Bookings
+// 6. Bookings (Scoped strictly by user or owner)
 app.get('/api/bookings', (req, res) => {
   const { userId, ownerId } = req.query;
+  if (!userId && !ownerId) {
+    return res.status(401).json({ success: false, error: 'Authorization required: userId or ownerId parameter is mandatory' });
+  }
   const db = readDB();
 
-  let bookingsList = db.bookings;
+  let bookingsList = db.bookings || [];
   if (userId) {
     bookingsList = bookingsList.filter(b => b.user_id === userId);
   } else if (ownerId) {
-    const ownerVenueIds = db.venues.filter(v => v.owner_id === ownerId).map(v => v.id);
+    const ownerVenueIds = (db.venues || []).filter(v => v.owner_id === ownerId).map(v => v.id);
     bookingsList = bookingsList.filter(b => ownerVenueIds.includes(b.venue_id));
   }
 
@@ -864,9 +949,12 @@ app.post('/api/bookings', (req, res) => {
 // 7. Messages
 app.get('/api/messages', (req, res) => {
   const chatId = req.query.chatId || req.query.conversationId;
+  if (!chatId) {
+    return res.status(400).json({ success: false, error: 'chatId or conversationId parameter is required' });
+  }
   const db = readDB();
   if (!db.messages) db.messages = [];
-  const filtered = chatId ? db.messages.filter(m => m.chat_id === chatId || m.conversation_id === chatId) : db.messages;
+  const filtered = db.messages.filter(m => m.chat_id === chatId || m.conversation_id === chatId);
   res.json({ success: true, messages: filtered });
 });
 
@@ -1056,7 +1144,13 @@ app.get('/api/users', (req, res) => {
     });
   }
 
-  res.json({ success: true, users });
+  // Strip sensitive credentials before returning
+  const sanitizedUsers = users.map(u => {
+    const { password, password_hash, password_salt, ...safeUser } = u;
+    return safeUser;
+  });
+
+  res.json({ success: true, users: sanitizedUsers });
 });
 
 // 10. Friend Management API
@@ -1192,18 +1286,19 @@ app.post('/api/friends/respond', (req, res) => {
 // 11. Chats & Direct Messaging API
 app.get('/api/chats', (req, res) => {
   const { userId, type } = req.query;
+  if (!userId) {
+    return res.status(401).json({ success: false, error: 'Authorization required: userId must be specified' });
+  }
   const db = readDB();
   db.chats = db.chats || [];
 
-  let chats = db.chats;
-  if (userId) {
-    chats = chats.filter(c => 
-      c.type === 'group' || 
-      c.type === 'club' || 
-      (c.participants && c.participants.includes(userId)) ||
-      c.created_by === userId
-    );
-  }
+  let chats = db.chats.filter(c => 
+    c.type === 'group' || 
+    c.type === 'club' || 
+    (c.participants && c.participants.includes(userId)) ||
+    c.created_by === userId
+  );
+
   if (type) {
     chats = chats.filter(c => c.type === type);
   }
@@ -2061,13 +2156,7 @@ app.post('/api/posts/:id/like', (req, res) => {
 
 // 15. User Profiles API (Cross-Device Account Sync)
 app.get('/api/profiles', (req, res) => {
-  try {
-    const db = readDB();
-    const profiles = db.profiles || db.users || [];
-    res.json(profiles);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.status(403).json({ success: false, error: 'Bulk profile harvesting is prohibited. Query profile by individual ID or email.' });
 });
 
 app.get('/api/profiles/:idOrEmail', (req, res) => {
@@ -2083,12 +2172,13 @@ app.get('/api/profiles/:idOrEmail', (req, res) => {
       (p.phone && String(p.phone).replace(/[^0-9]/g, '') === target.replace(/[^0-9]/g, ''))
     );
     if (found) {
-      res.json(found);
+      const { password, password_hash, password_salt, ...safeProfile } = found;
+      res.json(safeProfile);
     } else {
       res.status(404).json({ error: 'Profile not found' });
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to retrieve profile' });
   }
 });
 
@@ -2349,13 +2439,13 @@ app.get('/api/chats', (req, res) => {
   try {
     const db = readDB();
     const { userId } = req.query;
-    let chats = db.chats || [];
-    if (userId) {
-      chats = chats.filter(c => c.type === 'group' || (c.participants && c.participants.includes(userId)));
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Authorization required: userId must be provided' });
     }
+    let chats = (db.chats || []).filter(c => c.type === 'group' || (c.participants && c.participants.includes(userId)));
     res.json({ success: true, chats });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to retrieve chats' });
   }
 });
 
@@ -2669,6 +2759,12 @@ app.post('/api/hosted-matches/:matchId/leave', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Global Error Handling Middleware (Hide internal stack traces from users) ──
+app.use((err, req, res, next) => {
+  console.error('[UNCAUGHT SERVER ERROR]', err);
+  res.status(500).json({ success: false, error: 'An unexpected internal error occurred. Please try again later.' });
 });
 
 app.listen(PORT, () => {

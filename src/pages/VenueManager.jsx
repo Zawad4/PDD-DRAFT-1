@@ -4,11 +4,12 @@ import {
   Building2, Plus, MapPin, IndianRupee, Clock, Users, Edit3, Trash2,
   X, CheckCircle, TrendingUp, Calendar, Shield, Star, ChevronDown,
   ToggleLeft, ToggleRight, Camera, Phone, Globe, Zap, AlertCircle,
-  Navigation, Compass, Loader2, Check
+  Navigation, Compass, Loader2, Check, Lock, ShieldAlert
 } from 'lucide-react';
 import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
 import { apiFetchVenues, apiCreateVenue, apiDeleteVenue, apiFetchBookings, apiUpdateBookingStatus, apiFetchOwnerBookings } from '../services/db';
 import VenueImage from '../components/VenueImage';
+import { useToast } from '../context';
 
 /* ─── Reject Booking Modal ────────────────────────────── */
 function RejectBookingModal({ booking, onClose, onReject }) {
@@ -156,6 +157,7 @@ const SPORT_COLORS = {
 
 /* ─── Add Venue Modal ────────────────────────────────── */
 function AddVenueModal({ onClose, onAdd }) {
+  const { toast } = useToast();
   const [form, setForm] = useState({
     name: '', location: '', latitude: '13.0827', longitude: '80.2707', sports: [], pricePerHour: '',
     phone: '', description: '', image: '', fitMode: 'cover'
@@ -225,7 +227,7 @@ function AddVenueModal({ onClose, onAdd }) {
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
-      alert("Geolocation is not supported by your browser.");
+      toast.error("Geolocation is not supported by your browser.");
       return;
     }
     setIsDetectingGps(true);
@@ -263,7 +265,7 @@ function AddVenueModal({ onClose, onAdd }) {
       (err) => {
         console.error('GPS error:', err);
         setIsDetectingGps(false);
-        alert("Unable to fetch current GPS location. Please check browser permissions or choose from Map.");
+        toast.warning("Unable to fetch current GPS location. Please check browser permissions or choose from Map.");
       },
       { timeout: 10000, enableHighAccuracy: true }
     );
@@ -1338,8 +1340,13 @@ export default function VenueManager({ user, venueOffers, setVenueOffers }) {
   }, [user?.id, user?.uid, user?.firebase_uid]);
 
   const handleAdd = async (newVenueData) => {
+    const currentOwnerId = user?.id || user?.firebase_uid || user?.uid;
+    if (!currentOwnerId) {
+      alert('Authentication required: please log in as a venue owner.');
+      return;
+    }
     const dbRes = await apiCreateVenue({
-      owner_id: user?.id || 'usr_priya',
+      owner_id: currentOwnerId,
       name: newVenueData.name,
       sport: newVenueData.sports?.[0] || 'Football',
       sports: newVenueData.sports || [newVenueData.sports?.[0] || 'Football'],
@@ -1389,6 +1396,34 @@ export default function VenueManager({ user, venueOffers, setVenueOffers }) {
     await apiDeleteVenue(id);
     setVenues(prev => prev.filter(v => v.id !== id));
   };
+
+  if (!user || user.role !== 'owner') {
+    return (
+      <div className="min-h-screen bg-transparent pt-32 pb-16 px-4 flex items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-md w-full glass-card border border-rose-500/30 p-8 rounded-3xl text-center shadow-2xl relative overflow-hidden"
+        >
+          <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto mb-5 shadow-lg shadow-rose-950/40">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-black text-white uppercase tracking-tight mb-2">Access Restricted</h2>
+          <p className="text-sm text-neutral-400 mb-6 leading-relaxed">
+            The Venue Management Portal requires verified facility owner authorization. Your current account ({user?.full_name || 'Athlete'}) does not have owner privileges.
+          </p>
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => { window.location.href = '/'; }}
+              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white text-xs font-bold uppercase tracking-widest transition-all shadow-lg shadow-indigo-500/25"
+            >
+              Back to Player Home
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   const totalVenues = venues.length;
   const totalSlots = venues.reduce((sum, v) => sum + (v.totalSlots || 0), 0);

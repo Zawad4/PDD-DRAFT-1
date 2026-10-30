@@ -51,7 +51,7 @@ export default function MatchCancellationModal({ match, user, onClose, onSubmitC
               <h3 className="font-display font-black text-white text-lg leading-tight">Request Match Cancellation</h3>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer">
+          <button onClick={onClose} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -105,14 +105,14 @@ export default function MatchCancellationModal({ match, user, onClose, onSubmitC
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2.5 rounded-full text-xs font-bold text-neutral-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-neutral-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
             >
               Back
             </button>
 
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center space-x-2 cursor-pointer shadow-lg shadow-rose-600/30"
+              className="px-6 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center space-x-2 cursor-pointer shadow-lg shadow-rose-600/30"
             >
               <Send className="w-4 h-4" />
               <span>Submit Request to Host</span>

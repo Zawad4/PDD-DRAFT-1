@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, Users, Clock, Award, Star, Calendar, MessageSquare, Heart, Share2, Compass, Plus, Flame } from 'lucide-react';
 import { apiCreateDirectChat, apiSubscribeVenues, apiFetchHostedMatches, apiJoinHostedMatch, apiLeaveHostedMatch, apiCreateBooking } from '../services/db';
+import { useToast } from '../context';
 
 export default function Home({ 
   setTab, 
@@ -16,6 +17,7 @@ export default function Home({
   user,
   role
 }) {
+  const { toast } = useToast();
   // Static lists representing items that can be joined
   const [sessions, setSessions] = useState([
     {
@@ -291,7 +293,7 @@ export default function Home({
     if (setBookings) {
       setBookings(prev => [newBooking, ...(prev || [])]);
     }
-    alert(`Successfully booked slots at ${venueName}! View it anytime under 'Your Bookings'.`);
+    toast.success(`Successfully booked slots at ${venueName}! View it anytime under 'Your Bookings'.`, 'Booking Confirmed');
   };
 
   // Helper to color-code sports accents
@@ -635,7 +637,7 @@ export default function Home({
                           <div className="flex items-center space-x-2">
                             <button 
                               onClick={() => {
-                                alert(`Contact ${v.name || 'Venue Owner'} directly at ${v.phone || '+91 98765 43210'}.`);
+                                toast.info(`Contact ${v.name || 'Venue Owner'} directly at ${v.phone || '+91 98765 43210'}.`, 'Venue Contact');
                               }}
                               className="text-xs font-bold bg-white/10 hover:bg-white/20 border border-white/10 text-white px-3 py-2 rounded-full transition-colors flex items-center gap-1 cursor-pointer"
                               title="Contact venue owner directly"

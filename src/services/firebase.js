@@ -41,17 +41,17 @@ import {
   isSupported as isMessagingSupported 
 } from 'firebase/messaging';
 
-const env = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : (typeof process !== 'undefined' ? process.env : {});
+import { ENV } from '../config/env';
 
-// Firebase Configuration
+// Firebase Configuration (loaded securely from centralized config)
 const firebaseConfig = {
-  apiKey: "AIzaSyBJse-qZuxrbKM51ze5HQaw31CitPsdV5o",
-  authDomain: "turfington-b759a.firebaseapp.com",
-  projectId: "turfington-b759a",
-  storageBucket: "turfington-b759a.firebasestorage.app",
-  messagingSenderId: "147940618215",
-  appId: "1:147940618215:web:13f38ed41f9a6b6c7f9742",
-  measurementId: "G-1ZPEBPWNTP"
+  apiKey: ENV.FIREBASE.API_KEY,
+  authDomain: ENV.FIREBASE.AUTH_DOMAIN,
+  projectId: ENV.FIREBASE.PROJECT_ID,
+  storageBucket: ENV.FIREBASE.STORAGE_BUCKET,
+  messagingSenderId: ENV.FIREBASE.MESSAGING_SENDER_ID,
+  appId: ENV.FIREBASE.APP_ID,
+  measurementId: ENV.FIREBASE.MEASUREMENT_ID
 };
 
 // Initialize Firebase App

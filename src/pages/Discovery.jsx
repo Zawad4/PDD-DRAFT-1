@@ -12,6 +12,7 @@ import VenueImage from '../components/VenueImage';
 import { apiFetchTurfs, apiFetchNearbyTurfs, apiCreateBooking, apiUpdateBookingStatus, apiFetchNearbyPlayers, apiSearchUsers, apiFollowUser, apiCreateDirectChat, apiSubscribeVenues, apiCreateHostedMatch, apiFetchHostedMatches, apiJoinHostedMatch, apiLeaveHostedMatch } from '../services/db';
 import { openRazorpayCheckout } from '../services/razorpay';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
+import { useToast } from '../context';
 
 /* ── Sport Capacity Presets & Rules ──────────────────────── */
 export const SPORT_CAPACITY_PRESETS = [
@@ -53,6 +54,7 @@ export default function Discovery({
   setTab = null,
   onStartChat = null
 }) {
+  const { toast } = useToast();
   const [selectedDealsVenue, setSelectedDealsVenue] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('Near You');
@@ -1726,7 +1728,7 @@ export default function Discovery({
 
                     <div className="p-5 pt-0">
                        <button 
-                         onClick={() => alert(`Registration details for ${ev.title} sent to your email!`)}
+                         onClick={() => toast.success(`Registration details for ${ev.title} sent to your email!`, 'Registration Successful')}
                          className="w-full text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-full transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
                        >
                          <span>Register Team</span>
@@ -1794,7 +1796,7 @@ export default function Discovery({
                                 const ownerId = selectedMarker.owner_id || selectedMarker.ownerId || 'usr_venue_owner';
                                 const ownerName = selectedMarker.ownerName || selectedMarker.venue || selectedMarker.title || 'Venue Owner';
                                 await apiCreateDirectChat(user?.id || 'usr_me', ownerId);
-                                alert(`Opening message channel with ${ownerName} (${selectedMarker.title})...`);
+                                toast.info(`Opening message channel with ${ownerName}...`, 'Direct Message');
                               }}
                               className="bg-neutral-800 hover:bg-neutral-900 text-white py-1.5 rounded text-xs font-bold cursor-pointer"
                             >

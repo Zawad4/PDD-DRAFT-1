@@ -119,7 +119,7 @@ function fallbackDecrypt(payload, keyString) {
     }
     return result;
   } catch {
-    return '🔒 [Encrypted Message]';
+    return '[Encrypted Message]';
   }
 }
 
@@ -197,7 +197,7 @@ export async function decryptMessageText(cipherOrPlainText, conversationId) {
 
     const cryptoKey = await deriveConversationKey(conversationId);
     if (!cryptoKey || !isCryptoSubtleAvailable()) {
-      return '🔒 [Encrypted Message]';
+      return '[Encrypted Message]';
     }
 
     const decryptedBuffer = await window.crypto.subtle.decrypt(
@@ -213,7 +213,7 @@ export async function decryptMessageText(cipherOrPlainText, conversationId) {
     return decoder.decode(decryptedBuffer);
   } catch (err) {
     // Decryption failure (e.g. wrong key or tampering)
-    return '🔒 [Encrypted Message]';
+    return '[Encrypted Message]';
   }
 }
 

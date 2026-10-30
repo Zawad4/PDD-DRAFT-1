@@ -22,6 +22,7 @@ import {
   deleteChatMessage,
   markConversationAsRead
 } from '../services/chatService';
+import { useToast } from '../context';
 
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '🔥', '⚽'];
 
@@ -35,6 +36,7 @@ export default function ChatWindowEnhanced({
   onLeaveGroup = null,
   contextBanner = null // { type: 'marketplace'|'venue'|'game', title, price, image, subtitle }
 }) {
+  const { toast } = useToast();
   const conversationId = chat?.id || chat?.conversationId || chat?.groupId;
 
   // 0. Instantly populate messages from local persistent store (0ms thread continuation!)
@@ -312,7 +314,7 @@ export default function ChatWindowEnhanced({
     setHeaderMenuOpen(false);
     const targetId = chat?.participants?.find(p => p !== currentUserId) || chat?.created_by;
     await apiBlockUser(currentUserId, targetId, 'block');
-    alert(`User ${chat?.user || chat?.name} has been blocked.`);
+    toast.success(`User ${chat?.user || chat?.name} has been blocked.`, 'User Blocked');
   };
 
   const handleReportUser = async () => {
@@ -321,7 +323,7 @@ export default function ChatWindowEnhanced({
     if (reason) {
       const targetId = chat?.participants?.find(p => p !== currentUserId) || chat?.created_by;
       await apiSubmitReport({ reporterId: currentUserId, reportedUserId: targetId, conversationId: conversationId, reason });
-      alert("Report submitted to moderation team. Thank you.");
+      toast.success("Report submitted to moderation team. Thank you.", 'Report Submitted');
     }
   };
 

@@ -15,7 +15,6 @@ import {
   Lock,
   ArrowLeftRight,
   Loader2,
-  AlertTriangle,
   Camera,
   Check,
   Flame,
@@ -23,11 +22,10 @@ import {
   Clock,
   Share2,
   Copy,
-  Hash,
-  AlertCircle,
-  Trash2
+  Hash
 } from 'lucide-react';
-import { apiUpdateProfile, apiFetchPlayerReviews, getRatingColor, apiDeleteAccount } from '../services/db';
+import { apiUpdateProfile, apiFetchPlayerReviews, getRatingColor } from '../services/db';
+import { useToast } from '../context';
 import { auth } from '../services/firebase';
 import UserAvatar from '../components/UserAvatar';
 import PlayerReviewSection from '../components/PlayerReviewSection';
@@ -220,12 +218,9 @@ export default function Profile({
   onUpdateUser,
   setRole 
 }) {
-  const todayDayNum = new Date().getDate();
-  const currentMonthName = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
-
+  const { toast } = useToast();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('Overview');
-  const [selectedDay, setSelectedDay] = useState(todayDayNum);
   const [isSaving, setIsSaving] = useState(false);
 
   // Edit Profile States (Simple WhatsApp / Instagram Style)
@@ -243,12 +238,6 @@ export default function Profile({
   const [editPlayerId, setEditPlayerId] = useState(initialPlayerId);
   const [copiedId, setCopiedId] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-
-  // Delete Account Confirmation States
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deletePassword, setDeletePassword] = useState('');
-  const [deleteError, setDeleteError] = useState('');
-  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   // Default Seed Written Reviews - only real reviews
   const DEFAULT_INITIAL_REVIEWS = [];
@@ -356,7 +345,7 @@ export default function Profile({
           handle: formattedPlayerId
         });
         if (!success) {
-          alert('Failed to save profile to database: ' + error);
+          toast.error(error || 'Failed to save profile to database');
           setIsSaving(false);
           return;
         }
@@ -376,14 +365,14 @@ export default function Profile({
       showToast('✓ Profile & Player ID updated!');
     } catch (err) {
       console.error('Failed to save profile:', err);
-      alert('An error occurred while saving profile.');
+      toast.error('An error occurred while saving profile.');
     } finally {
       setIsSaving(false);
     }
   };
 
   // Profile data
-  const userStats = Array.isArray(user?.stats) ? user.stats : (role === 'owner' ? [
+  const baseStats = Array.isArray(user?.stats) ? user.stats : (role === 'owner' ? [
     { name: 'Hosted Events', value: '0' },
     { name: 'Followers', value: '0' },
     { name: 'Following', value: '0' },
@@ -391,9 +380,9 @@ export default function Profile({
   ] : [
     { name: 'Matches', value: '0' },
     { name: 'Followers', value: '0' },
-    { name: 'Following', value: '0' },
-    { name: 'Win Rate', value: '0%' }
+    { name: 'Following', value: '0' }
   ]);
+  const userStats = baseStats.filter(s => s && s.name !== 'Win Rate');
 
   const rawInterests = (Array.isArray(user?.sports_interests) && user.sports_interests.length > 0)
     ? user.sports_interests
@@ -427,17 +416,6 @@ export default function Profile({
     stats: userStats,
     interests: sportsInterestsList.map(s => ({ sport: s, level: 'Player', icon: getSportEmoji(s) }))
   };
-
-  const juneActivity = Array.isArray(user?.juneActivity)
-    ? user.juneActivity
-    : Array.from({ length: 30 }, (_, i) => ({
-        day: i + 1,
-        weight: 0,
-        matches: []
-      }));
-
-  const totalMatches = juneActivity.reduce((acc, d) => acc + (Array.isArray(d?.matches) ? d.matches.length : 0), 0);
-  const activeDaysCount = juneActivity.filter(d => d && d.weight > 0).length;
 
   return (
     <div className="min-h-screen bg-transparent pt-24 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-left transition-colors duration-500">
@@ -527,19 +505,11 @@ export default function Profile({
           >
             Edit Profile
           </button>
-          <button 
-            onClick={() => setShowDeleteConfirm(true)}
-            className="px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/20 text-rose-400 font-bold text-xs uppercase tracking-widest rounded-full transition-all flex items-center space-x-1.5 cursor-pointer"
-            title="Delete Account & Profile"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Delete Account</span>
-          </button>
         </div>
       </div>
 
       {/* 2. STATS BAR */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className={`grid grid-cols-2 ${profile.stats.length === 3 ? 'md:grid-cols-3' : 'md:grid-cols-4'} gap-4 mb-6`}>
         {profile.stats.map((stat, i) => (
           <div key={i} className="glass-card p-5 border border-white/5 space-y-1 text-center">
             <p className="text-[10px] text-neutral-400 uppercase tracking-widest font-extrabold">{stat.name}</p>
@@ -770,8 +740,8 @@ export default function Profile({
               : 'bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white'
           }`}
         >
-          <Calendar className="w-4 h-4" />
-          <span>Activity & Overview</span>
+          <Compass className="w-4 h-4" />
+          <span>Overview</span>
         </button>
 
         <button
@@ -795,12 +765,10 @@ export default function Profile({
         <PlayerReviewSection targetPlayer={user} currentUser={user} />
       ) : (
         /* OVERVIEW TAB CONTENT LAYOUT */
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           
-          {/* LEFT COLUMN: Overview & Activity Calendar */}
-          <div className="lg:col-span-2 space-y-8">
-            
-            {/* Sports Interests */}
+          {/* LEFT COLUMN: Sports Interests */}
+          <div className="space-y-8">
             <div className="glass-card p-6 border border-white/5 space-y-4">
               <h3 className="font-display font-extrabold text-sm uppercase tracking-wider pb-3 border-b border-white/5">
                 Sports Interests
@@ -815,61 +783,6 @@ export default function Profile({
                     <span>{item.sport}</span>
                   </div>
                 ))}
-              </div>
-            </div>
-
-            {/* Monthly Activity Calendar */}
-            <div className="glass-card p-6 border border-white/5 space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-white/5">
-                <div>
-                  <h3 className="font-display font-extrabold text-sm uppercase tracking-wider">
-                    Activity Calendar
-                  </h3>
-                  <p className="text-[11px] text-neutral-400 font-light mt-0.5">{currentMonthName}</p>
-                </div>
-
-                <div className="flex items-center space-x-3 text-xs font-bold text-neutral-400">
-                  <span className="flex items-center space-x-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-                    <span>{activeDaysCount} Active Days</span>
-                  </span>
-                  <span>•</span>
-                  <span>{totalMatches} Matches</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-7 gap-2">
-                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-                  <div key={d} className="text-center text-[10px] font-extrabold uppercase text-neutral-500 py-1">
-                    {d}
-                  </div>
-                ))}
-                {juneActivity.map((act) => {
-                  const isToday = act.day === todayDayNum;
-                  const isSelected = act.day === selectedDay;
-                  const isActive = act.weight > 0;
-
-                  return (
-                    <button
-                      key={act.day}
-                      onClick={() => setSelectedDay(act.day)}
-                      className={`h-11 rounded-xl flex flex-col items-center justify-center relative transition-all cursor-pointer border ${
-                        isSelected
-                          ? 'border-indigo-500 bg-indigo-500/20 text-white shadow-lg'
-                          : isToday
-                            ? 'border-white/30 bg-white/10 text-white'
-                            : isActive
-                              ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
-                              : 'border-white/5 bg-white/[0.01] text-neutral-500 hover:bg-white/[0.04]'
-                      }`}
-                    >
-                      <span className="text-xs font-bold">{act.day}</span>
-                      {isActive && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-0.5" />
-                      )}
-                    </button>
-                  );
-                })}
               </div>
             </div>
           </div>
@@ -1080,114 +993,7 @@ export default function Profile({
         )}
       </AnimatePresence>
 
-      {/* 6. DELETE ACCOUNT CONFIRMATION MODAL */}
-      <AnimatePresence>
-        {showDeleteConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowDeleteConfirm(false)} className="fixed inset-0 bg-black/90 backdrop-blur-2xl" />
-            
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 15 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="relative bg-[#111116] border border-rose-500/40 rounded-3xl p-6 max-w-md w-full z-10 text-left space-y-4 shadow-[0_25px_80px_rgba(0,0,0,0.95)]">
-              
-              <div className="flex items-center space-x-3 pb-3 border-b border-white/10">
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-full text-rose-400">
-                  <AlertTriangle className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-display font-extrabold text-white text-base">Delete Account & Profile?</h3>
-                  <p className="text-xs text-neutral-400 mt-0.5">This action is permanent and cannot be undone</p>
-                </div>
-              </div>
-
-              <p className="text-xs text-neutral-400 font-light leading-relaxed">
-                Are you sure you want to delete your account? All your personal profile records, bookings, match participations, ratings, reviews, and logs will be permanently deleted from authentication and databases.
-              </p>
-
-              {/* Password prompt if account uses email/password auth */}
-              {auth.currentUser?.providerData?.some(p => p.providerId === 'password') && (
-                <div className="space-y-1.5 pt-1">
-                  <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">
-                    Confirm Account Password (Optional)
-                  </label>
-                  <input
-                    type="password"
-                    value={deletePassword}
-                    onChange={(e) => setDeletePassword(e.target.value)}
-                    placeholder="Enter password to verify"
-                    className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-rose-500/50"
-                  />
-                </div>
-              )}
-
-              {auth.currentUser?.providerData?.some(p => p.providerId === 'google.com') && (
-                <div className="p-3 bg-white/[0.04] border border-white/10 rounded-xl flex items-center space-x-2 text-xs text-neutral-300">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Google account: Firebase authentication record will be removed.</span>
-                </div>
-              )}
-
-              {deleteError && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs flex items-center space-x-2">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  <span>{deleteError}</span>
-                </div>
-              )}
-
-              <div className="flex items-center justify-end space-x-3 pt-2">
-                <button
-                  type="button"
-                  disabled={isDeletingAccount}
-                  onClick={() => { setShowDeleteConfirm(false); setDeleteError(''); setDeletePassword(''); }}
-                  className="px-5 py-2.5 rounded-full text-xs font-bold text-neutral-400 hover:text-white cursor-pointer disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={isDeletingAccount}
-                  onClick={async () => {
-                    setIsDeletingAccount(true);
-                    setDeleteError('');
-                    try {
-                      const res = await apiDeleteAccount(user, deletePassword);
-                      if (res && res.error) {
-                        setDeleteError(res.error);
-                        setIsDeletingAccount(false);
-                        return;
-                      }
-                      setShowDeleteConfirm(false);
-                      setIsDeletingAccount(false);
-                      if (onLogout) {
-                        onLogout();
-                      }
-                    } catch (err) {
-                      console.warn('Account deletion handler completed with fallback:', err);
-                      setShowDeleteConfirm(false);
-                      setIsDeletingAccount(false);
-                      if (onLogout) {
-                        onLogout();
-                      }
-                    }
-                  }}
-                  className="px-6 py-2.5 rounded-full bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-rose-600/30 flex items-center space-x-2"
-                >
-                  {isDeletingAccount ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>Purging Account...</span>
-                    </>
-                  ) : (
-                    <span>Delete Account Permanently</span>
-                  )}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* 7. FLOATING TOAST NOTIFICATION */}
+      {/* 5. FLOATING TOAST NOTIFICATION */}
       <AnimatePresence>
         {toastMessage && (
           <motion.div

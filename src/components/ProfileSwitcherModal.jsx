@@ -22,18 +22,19 @@ import {
 } from '../services/db';
 import { ensureUserProfile } from '../services/chatService';
 import UserAvatar from './UserAvatar';
+import SportIcon from './SportIcon';
 
 const SPOTIFY_SPORTS_OPTIONS = [
-  { id: 'football', name: 'Football', icon: '⚽', desc: 'Turf 7v7, 5v5 & League matches' },
-  { id: 'cricket', name: 'Cricket', icon: '🏏', desc: 'Box cricket, Leather ball & Nets' },
-  { id: 'badminton', name: 'Badminton', icon: '🏸', desc: 'Wooden & Synthetic indoor courts' },
-  { id: 'basketball', name: 'Basketball', icon: '🏀', desc: 'Full court 5v5 & Streetball 3x3' },
-  { id: 'tennis', name: 'Tennis', icon: '🎾', desc: 'Clay, Hard court & Singles/Doubles' },
-  { id: 'table_tennis', name: 'Table Tennis', icon: '🏓', desc: 'Ping pong matches & Tournaments' },
-  { id: 'volleyball', name: 'Volleyball', icon: '🏐', desc: 'Indoor & Beach volleyball courts' },
-  { id: 'pickleball', name: 'Pickleball', icon: '🎾', desc: 'Fastest growing racket sport' },
-  { id: 'bowling', name: 'Bowling', icon: '🎳', desc: '10-pin lanes & Arcade challenges' },
-  { id: 'swimming', name: 'Swimming', icon: '🏊', desc: 'Lap pools & Aquatic training' }
+  { id: 'football', name: 'Football', desc: 'Turf 7v7, 5v5 & League matches' },
+  { id: 'cricket', name: 'Cricket', desc: 'Box cricket, Leather ball & Nets' },
+  { id: 'badminton', name: 'Badminton', desc: 'Wooden & Synthetic indoor courts' },
+  { id: 'basketball', name: 'Basketball', desc: 'Full court 5v5 & Streetball 3x3' },
+  { id: 'tennis', name: 'Tennis', desc: 'Clay, Hard court & Singles/Doubles' },
+  { id: 'table_tennis', name: 'Table Tennis', desc: 'Ping pong matches & Tournaments' },
+  { id: 'volleyball', name: 'Volleyball', desc: 'Indoor & Beach volleyball courts' },
+  { id: 'pickleball', name: 'Pickleball', desc: 'Fastest growing racket sport' },
+  { id: 'bowling', name: 'Bowling', desc: '10-pin lanes & Arcade challenges' },
+  { id: 'swimming', name: 'Swimming', desc: 'Lap pools & Aquatic training' }
 ];
 
 export default function ProfileSwitcherModal({
@@ -109,7 +110,7 @@ export default function ProfileSwitcherModal({
     try {
       const formattedInterests = (chosenSports || []).map(s => {
         const item = SPOTIFY_SPORTS_OPTIONS.find(sp => sp.name === s);
-        return { sport: s, level: 'Player', icon: item ? item.icon : '⚽' };
+        return { sport: s, level: 'Player' };
       });
 
       const completedProfile = {
@@ -311,8 +312,8 @@ export default function ProfileSwitcherModal({
           role: finalRole,
           sports_interests: profile?.sports_interests || ['Football', 'Cricket'],
           interests: profile?.interests || [
-            { sport: 'Football', level: 'Player', icon: '⚽' },
-            { sport: 'Cricket', level: 'Player', icon: '🏏' }
+            { sport: 'Football', level: 'Player',  },
+            { sport: 'Cricket', level: 'Player',  }
           ],
           is_profile_complete: true
         };
@@ -367,7 +368,7 @@ export default function ProfileSwitcherModal({
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-white/5">
           <div className="flex items-center space-x-2.5">
-            <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400">
+            <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
               <ArrowLeftRight className="w-5 h-5" />
             </div>
             <div>
@@ -381,7 +382,7 @@ export default function ProfileSwitcherModal({
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+            className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -393,14 +394,14 @@ export default function ProfileSwitcherModal({
             {/* Step 1: Role Selection */}
             {onboardingStep === 'role' && (
               <div className="space-y-4">
-                <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold uppercase tracking-wider">
+                <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Step 1 of 2 • Select Account Role</span>
                 </div>
 
                 <div>
                   <h4 className="text-base font-black font-display text-white">
-                    Choose role for <span className="text-indigo-400">{onboardingNewProfile.full_name || onboardingNewProfile.email}</span>
+                    Choose role for <span className="text-emerald-400">{onboardingNewProfile.full_name || onboardingNewProfile.email}</span>
                   </h4>
                   <p className="text-xs text-neutral-400 mt-1 font-light">
                     Select your primary role on Turfington.
@@ -413,11 +414,11 @@ export default function ProfileSwitcherModal({
                     onClick={() => setOnboardingRole('player')}
                     className={`p-4 rounded-2xl border transition-all text-left flex items-start space-x-3.5 cursor-pointer ${
                       onboardingRole === 'player'
-                        ? 'bg-indigo-600/20 border-indigo-500 ring-1 ring-indigo-500/50'
+                        ? 'bg-emerald-500 text-black hover:bg-emerald-400/20 border-emerald-500 ring-1 ring-indigo-500/50'
                         : 'bg-white/[0.02] border-white/10 hover:border-white/20'
                     }`}
                   >
-                    <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 mt-0.5">
+                    <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mt-0.5">
                       <User className="w-5 h-5" />
                     </div>
                     <div>
@@ -466,7 +467,7 @@ export default function ProfileSwitcherModal({
                         setOnboardingStep('sports');
                       }
                     }}
-                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-wider rounded-full shadow-lg shadow-indigo-600/30 cursor-pointer"
+                    className="px-6 py-2.5 bg-emerald-500 text-black hover:bg-emerald-400  text-white font-black text-xs uppercase tracking-wider rounded-full shadow-lg shadow-md cursor-pointer"
                   >
                     {onboardingRole === 'owner' ? 'Complete & Switch' : 'Next: Sports Preferences →'}
                   </button>
@@ -477,7 +478,7 @@ export default function ProfileSwitcherModal({
             {/* Step 2: Sports Preferences (Only for Players) */}
             {onboardingStep === 'sports' && (
               <div className="space-y-4">
-                <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold uppercase tracking-wider">
+                <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Step 2 of 2 • Sports Preferences</span>
                 </div>
@@ -509,15 +510,15 @@ export default function ProfileSwitcherModal({
                         }}
                         className={`p-3 rounded-xl border text-left flex items-center justify-between cursor-pointer transition-all ${
                           isSelected
-                            ? 'bg-indigo-600/20 border-indigo-500 text-white'
+                            ? 'bg-emerald-500 text-black hover:bg-emerald-400/20 border-emerald-500 text-white'
                             : 'bg-white/[0.02] border-white/10 text-neutral-400 hover:border-white/20 hover:text-white'
                         }`}
                       >
                         <div className="flex items-center space-x-2">
-                          <span className="text-lg">{sp.icon}</span>
+                          <SportIcon sport={sp.name} size={18} className="text-emerald-400" />
                           <span className="text-xs font-bold">{sp.name}</span>
                         </div>
-                        {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400 stroke-[3]" />}
+                        {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />}
                       </button>
                     );
                   })}
@@ -535,7 +536,7 @@ export default function ProfileSwitcherModal({
                     type="button"
                     disabled={onboardingSports.length === 0 || authLoading}
                     onClick={() => handleFinishOnboarding('player', onboardingSports)}
-                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-wider rounded-full shadow-lg shadow-indigo-600/30 cursor-pointer disabled:opacity-50 flex items-center space-x-2"
+                    className="px-6 py-2.5 bg-emerald-500 text-black hover:bg-emerald-400  text-white font-black text-xs uppercase tracking-wider rounded-full shadow-lg shadow-md cursor-pointer disabled:opacity-50 flex items-center space-x-2"
                   >
                     {authLoading ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -566,7 +567,7 @@ export default function ProfileSwitcherModal({
                       onClick={() => handleSwitch(prof)}
                       className={`p-3.5 rounded-2xl border transition-all duration-200 cursor-pointer flex items-center justify-between group ${
                         isActive
-                          ? 'bg-indigo-600/15 border-indigo-500/40 ring-1 ring-indigo-500/30'
+                          ? 'bg-emerald-500 text-black hover:bg-emerald-400/15 border-emerald-500/40 ring-1 ring-indigo-500/30'
                           : 'bg-white/[0.02] border-white/5 hover:border-white/20 hover:bg-white/[0.05]'
                       }`}
                     >
@@ -580,13 +581,13 @@ export default function ProfileSwitcherModal({
 
                         <div className="min-w-0 text-left">
                           <div className="flex items-center space-x-2">
-                            <p className="text-xs font-black text-white truncate group-hover:text-indigo-400 transition-colors">
+                            <p className="text-xs font-black text-white truncate group-hover:text-emerald-400 transition-colors">
                               {prof.full_name || 'Authenticated Member'}
                             </p>
                             <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${
                               prof.role === 'owner'
                                 ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
-                                : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/20'
+                                : 'bg-emerald-500/10 text-indigo-300 border-emerald-500/20'
                             }`}>
                               {prof.role === 'owner' ? 'Venue Owner' : 'Player'}
                             </span>
@@ -612,7 +613,7 @@ export default function ProfileSwitcherModal({
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
 
-                            <button className="text-[10px] font-extrabold uppercase bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-full border border-indigo-500/30 transition-all cursor-pointer shadow-md">
+                            <button className="text-[10px] font-extrabold uppercase bg-emerald-500 text-black hover:bg-emerald-400  text-white px-3 py-1.5 rounded-xl border border-emerald-500/30 transition-all cursor-pointer shadow-md">
                               Switch
                             </button>
                           </>
@@ -629,7 +630,7 @@ export default function ProfileSwitcherModal({
               <button
                 type="button"
                 onClick={() => { setShowAddForm(true); setErrorMsg(''); }}
-                className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold uppercase tracking-wider rounded-full transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-lg shadow-indigo-600/30"
+                className="w-full py-3.5 px-4 bg-emerald-500 text-black hover:bg-emerald-400  text-white text-xs font-extrabold uppercase tracking-wider rounded-full transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-lg shadow-md"
               >
                 <Plus className="w-4 h-4" />
                 <span>Add Account</span>
@@ -641,7 +642,7 @@ export default function ProfileSwitcherModal({
           <div className="space-y-4 mt-4 text-left">
             {errorMsg && (
               <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-300 font-medium">
-                ⚠️ {errorMsg}
+                {errorMsg}
               </div>
             )}
 
@@ -650,7 +651,7 @@ export default function ProfileSwitcherModal({
               type="button"
               onClick={handleGoogleAddProfile}
               disabled={googleLoading || authLoading}
-              className="w-full py-3 px-4 bg-white text-black font-extrabold text-xs rounded-full hover:bg-neutral-200 transition-all flex items-center justify-center space-x-2.5 cursor-pointer shadow-md disabled:opacity-50"
+              className="w-full py-3 px-4 bg-white text-black font-extrabold text-xs rounded-xl hover:bg-neutral-200 transition-all flex items-center justify-center space-x-2.5 cursor-pointer shadow-md disabled:opacity-50"
             >
               {googleLoading ? (
                 <Loader2 className="w-4 h-4 animate-spin text-black" />
@@ -677,7 +678,7 @@ export default function ProfileSwitcherModal({
                 type="button"
                 onClick={() => { setAuthMode('login'); setErrorMsg(''); }}
                 className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  authMode === 'login' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-white'
+                  authMode === 'login' ? 'bg-emerald-500 text-black hover:bg-emerald-400 text-white' : 'text-neutral-400 hover:text-white'
                 }`}
               >
                 Sign In to Account
@@ -686,7 +687,7 @@ export default function ProfileSwitcherModal({
                 type="button"
                 onClick={() => { setAuthMode('signup'); setErrorMsg(''); }}
                 className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  authMode === 'signup' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-white'
+                  authMode === 'signup' ? 'bg-emerald-500 text-black hover:bg-emerald-400 text-white' : 'text-neutral-400 hover:text-white'
                 }`}
               >
                 Create New Account
@@ -706,7 +707,7 @@ export default function ProfileSwitcherModal({
                       placeholder="e.g. Ramesh Kumar"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
-                      className="w-full pl-9 pr-3.5 py-2.5 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
+                      className="w-full pl-9 pr-3.5 py-2.5 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                 </div>
@@ -722,7 +723,7 @@ export default function ProfileSwitcherModal({
                     placeholder="name@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full pl-9 pr-3.5 py-2.5 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
@@ -738,7 +739,7 @@ export default function ProfileSwitcherModal({
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full pl-9 pr-3.5 py-2.5 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-neutral-900 border border-white/10 rounded-xl text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
@@ -747,14 +748,14 @@ export default function ProfileSwitcherModal({
                 <button
                   type="button"
                   onClick={() => { setShowAddForm(false); setErrorMsg(''); }}
-                  className="flex-1 py-2.5 text-xs font-bold text-neutral-400 hover:text-white border border-white/10 rounded-full cursor-pointer"
+                  className="flex-1 py-2.5 text-xs font-bold text-neutral-400 hover:text-white border border-white/10 rounded-xl cursor-pointer"
                 >
                   Back
                 </button>
                 <button
                   type="submit"
                   disabled={authLoading}
-                  className="flex-1 py-2.5 text-xs font-black uppercase bg-indigo-600 hover:bg-indigo-500 text-white rounded-full transition-all cursor-pointer shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                  className="flex-1 py-2.5 text-xs font-black uppercase bg-emerald-500 text-black hover:bg-emerald-400  text-white rounded-xl transition-all cursor-pointer shadow-lg shadow-md flex items-center justify-center space-x-1.5 disabled:opacity-50"
                 >
                   {authLoading ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />

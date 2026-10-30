@@ -1,15 +1,13 @@
 import { apiCreateBooking } from './db';
+import { ENV } from '../config/env';
 
-const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_TWTmM3CwfnUSnT';
+const RAZORPAY_KEY_ID = ENV.RAZORPAY_KEY_ID || 'rzp_test_TWTmM3CwfnUSnT';
 
 /**
  * Helper to determine API Base URL
  */
 const getApiBaseUrl = () => {
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    return 'http://localhost:5000';
-  }
-  return '';
+  return ENV.API_BASE_URL || (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:5000' : '');
 };
 
 /**

@@ -37,7 +37,7 @@ export default function HostMatchRequestsModal({
               <h3 className="font-display font-black text-white text-lg leading-tight">Review Match Requests</h3>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer">
+          <button onClick={onClose} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>

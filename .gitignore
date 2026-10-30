@@ -7,10 +7,41 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Node dependencies & builds
 node_modules
 dist
 dist-ssr
 *.local
+
+# Environment variables, credentials & secrets (CRITICAL FOR GITHUB SECURITY)
+.env
+.env.*
+.env.production
+.env.development
+!.env.example
+*.pem
+*.key
+*.cert
+*.pfx
+*.p12
+credentials.json
+serviceAccountKey.json
+service-account*.json
+*secret*
+*credential*
+
+# Local databases, dumps & automated daily backups
+turfington_db*.json
+backups/
+*.backup.json
+*.sqlite
+*.db
+
+# Mobile secrets & credentials
+*.keystore
+*.jks
+android/app/google-services.json
+ios/App/App/GoogleService-Info.plist
 
 # Editor directories and files
 .vscode/*
