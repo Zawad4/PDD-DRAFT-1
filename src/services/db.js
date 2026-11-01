@@ -21,6 +21,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
+
   deleteUser, 
   signOut, 
   reauthenticateWithPopup, 
@@ -94,7 +95,7 @@ export async function apiFetchProfile(firebaseUid) {
   
   // 2. Query Express backend server (shared cross-device database on localhost)
   try {
-    const res = await fetch(`http://localhost:5000/api/profiles/${encodeURIComponent(firebaseUid)}`);
+    const res = await fetch(`${API_BASE}/api/profiles/${encodeURIComponent(firebaseUid)}`);
     if (res.ok) {
       const serverProfile = await res.json();
       if (serverProfile) {
@@ -146,7 +147,7 @@ export async function apiFetchProfileByEmail(email) {
 
   // 1. Query Express backend server
   try {
-    const res = await fetch(`http://localhost:5000/api/profiles/${encodeURIComponent(cleanEmail)}`);
+    const res = await fetch(`${API_BASE}/api/profiles/${encodeURIComponent(cleanEmail)}`);
     if (res.ok) {
       const serverProfile = await res.json();
       if (serverProfile) {
@@ -207,7 +208,7 @@ export async function apiCreateProfile(profileData) {
         };
 
         // Persist to server.js
-        fetch('http://localhost:5000/api/profiles', {
+        fetch(`${API_BASE}/api/profiles`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(mergedProfile)
@@ -235,7 +236,7 @@ export async function apiCreateProfile(profileData) {
   };
 
   // Persist to server.js
-  fetch('http://localhost:5000/api/profiles', {
+  fetch(`${API_BASE}/api/profiles`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(profileToSave)
@@ -289,7 +290,7 @@ export async function apiUpdateProfile(profileId, updates) {
   setLocalProfile(updatedProfile);
 
   // Persist to Express server.js
-  fetch(`http://localhost:5000/api/profiles/${encodeURIComponent(profileId)}`, {
+  fetch(`${API_BASE}/api/profiles/${encodeURIComponent(profileId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updatedProfile)
@@ -378,7 +379,7 @@ export async function apiDeleteUserSavedProfile(profileId, ownerEmailOrUid) {
 
   deleteDoc(doc(db, 'profiles', profileId)).catch(() => {});
   deleteDoc(doc(db, 'users', profileId)).catch(() => {});
-  fetch(`http://localhost:5000/api/profiles/${encodeURIComponent(profileId)}`, { method: 'DELETE' }).catch(() => {});
+  fetch(`${API_BASE}/api/profiles/${encodeURIComponent(profileId)}`, { method: 'DELETE' }).catch(() => {});
 }
 
 export async function apiDeleteAccount(userOrIdentifier, confirmPassword = null) {
@@ -424,14 +425,14 @@ export async function apiDeleteAccount(userOrIdentifier, confirmPassword = null)
 
   // 2. CRITICAL: Purge from Express backend server database (turfington_db.json)
   try {
-    await fetch('http://localhost:5000/api/users/purge-account', {
+    await fetch(`${API_BASE}/api/users/purge-account`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifiers: allTargets })
     }).catch(() => {});
 
     for (const target of allTargets) {
-      await fetch(`http://localhost:5000/api/profiles/${encodeURIComponent(target)}`, {
+      await fetch(`${API_BASE}/api/profiles/${encodeURIComponent(target)}`, {
         method: 'DELETE'
       }).catch(() => {});
     }
@@ -927,7 +928,7 @@ export async function apiSearchUsers(queryStr, currentUserId = null) {
 
   // 2. Search Express backend
   try {
-    const res = await fetch('http://localhost:5000/api/users');
+    const res = await fetch(`${API_BASE}/api/users`);
     if (res.ok) {
       const data = await res.json();
       const list = Array.isArray(data) ? data : (data.users || []);
@@ -1097,6 +1098,10 @@ export async function apiRespondFriendRequest(friendshipId, status) {
 
 // -- 3. Real-Time Communication System ----------------------
 export * from './chatService';
+
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
+  ? import.meta.env.VITE_API_URL
+  : (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.PROD ? '' : 'http://localhost:5000');
 
 export const DEFAULT_COMMUNITY_GROUPS = [
   {
@@ -1342,7 +1347,7 @@ export async function apiFetchChats(userId) {
     }
 
     // Express backend fallback
-    const res = await fetch(`http://localhost:5000/api/chats?userId=${userId}`);
+    const res = await fetch(`${API_BASE}/api/chats?userId=${userId}`);
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.chats) return json.chats;
@@ -1538,7 +1543,7 @@ export async function apiFetchMessages(conversationId) {
 
   // Server fallback
   try {
-    const res = await fetch(`http://localhost:5000/api/messages?chatId=${conversationId}`);
+    const res = await fetch(`${API_BASE}/api/messages?chatId=${conversationId}`);
     if (res.ok) {
       const json = await res.json();
       return json.messages || [];
@@ -1613,7 +1618,7 @@ export async function apiSendMessage(conversationId, senderId, content, replyToI
     }
 
     // Express backend sync
-    fetch('http://localhost:5000/api/messages', {
+    fetch(`${API_BASE}/api/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1631,7 +1636,7 @@ export async function apiSendMessage(conversationId, senderId, content, replyToI
     console.warn("apiSendMessage Firestore error:", e);
     // Express backend fallback
     try {
-      const res = await fetch('http://localhost:5000/api/messages', {
+      const res = await fetch(`${API_BASE}/api/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1827,7 +1832,7 @@ export async function apiFetchAthletes(currentUserId) {
 
     // 3. Fetch from Express backend
     try {
-      const res = await fetch('http://localhost:5000/api/users');
+      const res = await fetch(`${API_BASE}/api/users`);
       if (res.ok) {
         const data = await res.json();
         const users = Array.isArray(data) ? data : (data.users || []);
@@ -2233,7 +2238,7 @@ export async function apiFetchVenues(filters = {}) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch('http://localhost:5000/api/venues', { signal: controller.signal });
+    const res = await fetch(`${API_BASE}/api/venues`, { signal: controller.signal });
     clearTimeout(timeout);
     if (res.ok) {
       const data = await res.json();
@@ -2318,7 +2323,7 @@ export async function apiFetchTurfs() {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch('http://localhost:5000/api/venues', { signal: controller.signal });
+    const res = await fetch(`${API_BASE}/api/venues`, { signal: controller.signal });
     clearTimeout(timeout);
     if (res.ok) {
       const data = await res.json();
@@ -2543,7 +2548,7 @@ export async function apiCreateVenue(venueData) {
 
   // 4. Send POST to Express API server in background
   try {
-    fetch('http://localhost:5000/api/venues', {
+    fetch(`${API_BASE}/api/venues`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(customVenue)
@@ -2583,7 +2588,7 @@ export async function apiDeleteVenue(venueId) {
   } catch {}
 
   try {
-    fetch(`http://localhost:5000/api/venues/${venueId}`, { method: 'DELETE' }).catch(() => {});
+    fetch(`${API_BASE}/api/venues/${venueId}`, { method: 'DELETE' }).catch(() => {});
   } catch {}
 
   deleteDoc(doc(db, 'venues', venueId)).catch(() => {});
@@ -2910,7 +2915,7 @@ export async function apiFetchPosts() {
   // 1. Fetch from Express backend server (cross-account shared DB on localhost)
   let serverPosts = [];
   try {
-    const res = await fetch('http://localhost:5000/api/posts');
+    const res = await fetch(`${API_BASE}/api/posts`);
     if (res.ok) {
       const data = await res.json();
       serverPosts = Array.isArray(data) ? data : (Array.isArray(data?.posts) ? data.posts : []);
@@ -2973,7 +2978,7 @@ export async function apiCreatePost(postData) {
 
   // 2. Persist to Express backend server
   try {
-    fetch('http://localhost:5000/api/posts', {
+    fetch(`${API_BASE}/api/posts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(formattedPost)
@@ -3011,7 +3016,7 @@ export async function apiLikePost(postId, userId) {
 
   // 2. Update Express server
   try {
-    fetch(`http://localhost:5000/api/posts/${postId}/like`, {
+    fetch(`${API_BASE}/api/posts/${postId}/like`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId })
@@ -3179,7 +3184,7 @@ export async function apiGetEmailByUsername(username) {
 export async function apiFetchPlayerReviews(playerId) {
   const cacheKey = 'turfington_player_reviews_' + playerId;
   try {
-    const res = await fetch(`http://localhost:5000/api/players/${encodeURIComponent(playerId)}/reviews`);
+    const res = await fetch(`${API_BASE}/api/players/${encodeURIComponent(playerId)}/reviews`);
     if (res.ok) {
       const data = await res.json();
       if (data && data.success) {
@@ -3267,7 +3272,7 @@ export async function apiSubmitPlayerReview(playerId, reviewData) {
   let serverReview = null;
 
   try {
-    const res = await fetch(`http://localhost:5000/api/players/${encodeURIComponent(playerId)}/reviews`, {
+    const res = await fetch(`${API_BASE}/api/players/${encodeURIComponent(playerId)}/reviews`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(reviewData)
@@ -3328,7 +3333,7 @@ export async function apiSubmitPlayerReview(playerId, reviewData) {
 
 export async function apiToggleReviewHelpful(reviewId, userId) {
   try {
-    const res = await fetch(`http://localhost:5000/api/reviews/${encodeURIComponent(reviewId)}/helpful`, {
+    const res = await fetch(`${API_BASE}/api/reviews/${encodeURIComponent(reviewId)}/helpful`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId })
@@ -3344,7 +3349,7 @@ export async function apiToggleReviewHelpful(reviewId, userId) {
 export async function apiFetchHostedMatches() {
   let serverMatches = [];
   try {
-    const res = await fetch('http://localhost:5000/api/hosted-matches');
+    const res = await fetch(`${API_BASE}/api/hosted-matches`);
     if (res.ok) {
       const data = await res.json();
       if (data && data.success && Array.isArray(data.matches)) {
@@ -3375,7 +3380,7 @@ export async function apiFetchHostedMatches() {
 export async function apiCreateHostedMatch(matchData) {
   let createdMatch = null;
   try {
-    const res = await fetch('http://localhost:5000/api/hosted-matches', {
+    const res = await fetch(`${API_BASE}/api/hosted-matches`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(matchData)
@@ -3446,7 +3451,7 @@ export async function apiJoinHostedMatch(matchId, user) {
   };
 
   try {
-    const res = await fetch(`http://localhost:5000/api/hosted-matches/${encodeURIComponent(matchId)}/join`, {
+    const res = await fetch(`${API_BASE}/api/hosted-matches/${encodeURIComponent(matchId)}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -3485,7 +3490,7 @@ export async function apiJoinHostedMatch(matchId, user) {
 
 export async function apiLeaveHostedMatch(matchId, userId) {
   try {
-    await fetch(`http://localhost:5000/api/hosted-matches/${encodeURIComponent(matchId)}/leave`, {
+    await fetch(`${API_BASE}/api/hosted-matches/${encodeURIComponent(matchId)}/leave`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId })

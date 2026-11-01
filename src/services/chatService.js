@@ -23,10 +23,15 @@ import {
   increment
 } from 'firebase/firestore';
 import {
+
   encryptMessageText,
   decryptMessageText,
   isMessageEncrypted
 } from './cryptoService.js';
+
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
+  ? import.meta.env.VITE_API_URL
+  : (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.PROD ? '' : 'http://localhost:5000');
 
 // ─────────────────────────────────────────────────────────────
 // 0. Indestructible Local & Real-time Persistent Message Store
@@ -424,7 +429,7 @@ export async function getOrCreateDirectConversation(currentUser, targetUser) {
 
     // 2. Persist to Express backend in background
     try {
-      fetch('http://localhost:5000/api/chats/direct', {
+      fetch(`${API_BASE}/api/chats/direct`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user1Id: currentUid, user2Id: targetUid })
@@ -553,7 +558,7 @@ export async function createCommunityGroup(groupData, creatorUser) {
 
   // 2. Persist to Express API server (writes to turfington_db.json so it is visible to ALL users)
   try {
-    fetch('http://localhost:5000/api/community-groups', {
+    fetch(`${API_BASE}/api/community-groups`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -626,7 +631,7 @@ export async function joinCommunityGroup(groupId, user) {
 
   // 1. Notify Express backend
   try {
-    fetch(`http://localhost:5000/api/community-groups/${groupId}/join`, {
+    fetch(`${API_BASE}/api/community-groups/${groupId}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: uid })
@@ -706,7 +711,7 @@ export async function leaveCommunityGroup(groupId, user) {
 
   // 1. Notify Express backend
   try {
-    fetch(`http://localhost:5000/api/community-groups/${groupId}/leave`, {
+    fetch(`${API_BASE}/api/community-groups/${groupId}/leave`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: uid })
@@ -1016,7 +1021,7 @@ export async function sendChatMessage(conversationId, senderUser, text, options 
 
     // Express backend fallback persistence
     try {
-      fetch('http://localhost:5000/api/messages', {
+      fetch(`${API_BASE}/api/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1460,7 +1465,7 @@ export function subscribeToMessages(conversationId, arg2, arg3 = 50) {
       safeCallback({ messages: fallbackMsgs, oldestDoc: null, hasMore: false });
 
       // 2. Non-blocking fallback to Express backend if running
-      fetch(`http://localhost:5000/api/messages?chatId=${encodeURIComponent(conversationId)}`)
+      fetch(`${API_BASE}/api/messages?chatId=${encodeURIComponent(conversationId)}`)
         .then(res => res.ok ? res.json() : null)
         .then(async data => {
           if (!data) return;

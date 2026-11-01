@@ -2,7 +2,6 @@
   "expo": {
     "name": "sports-mobile-shell",
     "slug": "sports-mobile-shell",
-    "owner": "zawad_44",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",

@@ -11,8 +11,8 @@ export const ENV = {
   IS_PROD: metaEnv.PROD ?? true,
   MODE: metaEnv.MODE || 'production',
 
-  // API Backend Base URL
-  API_BASE_URL: metaEnv.VITE_API_URL || 'http://localhost:5000',
+  // API Backend Base URL (Relative '' in production on Vercel, http://localhost:5000 in dev)
+  API_BASE_URL: metaEnv.VITE_API_URL || (metaEnv.PROD ? '' : 'http://localhost:5000'),
 
   // Firebase Configuration
   FIREBASE: {

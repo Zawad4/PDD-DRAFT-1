@@ -25,6 +25,11 @@ import {
 import { apiFetchAthletes, apiSearchUsers, apiFollowUser, NPC_TEST_USER_IDS } from '../services/db';
 import { auth, setupPushNotifications } from '../services/firebase';
 
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
+  ? import.meta.env.VITE_API_URL
+  : (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.PROD ? '' : 'http://localhost:5000');
+
+
 const SPORT_CATEGORIES = ['All', 'Football', 'Cricket', 'Badminton', 'Pickleball', 'Table Tennis', 'Bowling'];
 
 export function getGroupImage(group) {
@@ -408,7 +413,7 @@ export default function Community({ user, setTab }) {
 
       // Notify backend Express server
       try {
-        fetch('http://localhost:5000/api/chats/direct', {
+        fetch(`${API_BASE}/api/chats/direct`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user1Id: currentUserId, user2Id: athleteId })

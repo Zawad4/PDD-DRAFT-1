@@ -15,8 +15,22 @@ app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
-// Database file path
-const DB_FILE = path.join(__dirname, 'turfington_db.json');
+// Database file path (Uses /tmp on Vercel Serverless Functions)
+const DB_FILE = process.env.VERCEL === '1'
+  ? path.join('/tmp', 'turfington_db.json')
+  : path.join(__dirname, 'turfington_db.json');
+
+// Initialize /tmp/turfington_db.json on Vercel if needed
+if (process.env.VERCEL === '1' && !fs.existsSync(DB_FILE)) {
+  const bundledDb = path.join(__dirname, 'turfington_db.json');
+  if (fs.existsSync(bundledDb)) {
+    try {
+      fs.copyFileSync(bundledDb, DB_FILE);
+    } catch (e) {
+      console.warn('Could not seed /tmp DB:', e.message);
+    }
+  }
+}
 
 // ── Security Headers & Transport Hardening ──
 app.use((req, res, next) => {
@@ -646,7 +660,11 @@ function readDB() {
       return dbCache;
     }
     if (!fs.existsSync(DB_FILE)) {
-      fs.writeFileSync(DB_FILE, JSON.stringify(INITIAL_DATA, null, 2));
+      try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(INITIAL_DATA, null, 2));
+      } catch (e) {
+        console.warn('Notice: running in ephemeral memory mode on serverless:', e.message);
+      }
       dbCache = INITIAL_DATA;
       lastReadTime = now;
       return INITIAL_DATA;
@@ -2767,7 +2785,12 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, error: 'An unexpected internal error occurred. Please try again later.' });
 });
 
-app.listen(PORT, () => {
-  console.log(`⚡ Turfington Database API Server running at http://localhost:${PORT}`);
-});
+// Start listener only when run directly (not in Vercel Serverless environment)
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, () => {
+    console.log(`⚡ Turfington Database API Server running at http://localhost:${PORT}`);
+  });
+}
+
+export default app;
 
