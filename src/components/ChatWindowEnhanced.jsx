@@ -22,6 +22,7 @@ import {
   deleteChatMessage,
   markConversationAsRead
 } from '../services/chatService';
+import UserAvatar from './UserAvatar';
 import { useToast } from '../context';
 
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '🔥', '⚽'];
@@ -76,7 +77,7 @@ export default function ChatWindowEnhanced({
 
   const currentUserId = currentUser?.id || currentUser?.uid || currentUser?.firebase_uid || 'usr_me';
   const currentUserName = currentUser?.name || currentUser?.displayName || currentUser?.full_name || 'You';
-  const currentUserAvatar = currentUser?.avatar || currentUser?.avatarUrl || currentUser?.avatar_url || 'https://api.dicebear.com/7.x/bottts/svg?seed=Me';
+  const currentUserAvatar = currentUser?.avatar || currentUser?.avatarUrl || currentUser?.avatar_url || '';
 
   // 1. Initial Load & Realtime Setup with pagination
   useEffect(() => {
@@ -227,7 +228,15 @@ export default function ChatWindowEnhanced({
       created_at: new Date().toISOString()
     };
 
-    setMessages(prev => [...prev, newMsg]);
+    setMessages(prev => {
+      const exists = prev.some(m => 
+        m.id === idempotencyKey || 
+        m.idempotency_key === idempotencyKey ||
+        (m.text === textToSend && (m.senderUid === currentUserId || m.sender_id === currentUserId) && Math.abs(new Date(m.created_at || m.createdAt || 0).getTime() - Date.now()) < 10000)
+      );
+      if (exists) return prev;
+      return [...prev, newMsg];
+    });
 
     const recipientUid = chat?.otherUid || (chat?.participants || []).find(id => id !== currentUserId) || null;
     const recipientName = chat?.name || chat?.title || 'Athlete';
@@ -349,18 +358,31 @@ export default function ChatWindowEnhanced({
           </button>
 
           <div className="relative flex-shrink-0">
-            <img
-              src={chat.avatar || chat.avatar_url || chat.image_url || '/football_group.jpg'}
-              alt={chat.name || chat.user}
-              onError={(e) => {
-                e.currentTarget.onerror = null;
-                const sport = String(chat?.sport || chat?.sportCategory || chat?.name || '').toLowerCase();
-                if (sport.includes('badminton') || sport.includes('smasher')) e.currentTarget.src = '/badminton_group.jpg';
-                else if (sport.includes('cricket')) e.currentTarget.src = '/cricket_group.jpg';
-                else e.currentTarget.src = '/football_group.jpg';
-              }}
-              className="w-10 h-10 rounded-2xl object-cover border border-white/15 shadow-md"
-            />
+            {isGroup ? (
+              <img
+                src={chat.avatar || chat.avatar_url || chat.image_url || '/football_group.jpg'}
+                alt={chat.name || chat.user}
+                onError={(e) => {
+                  e.currentTarget.onerror = null;
+                  const sport = String(chat?.sport || chat?.sportCategory || chat?.name || '').toLowerCase();
+                  if (sport.includes('badminton') || sport.includes('smasher')) e.currentTarget.src = '/badminton_group.jpg';
+                  else if (sport.includes('cricket')) e.currentTarget.src = '/cricket_group.jpg';
+                  else e.currentTarget.src = '/football_group.jpg';
+                }}
+                className="w-10 h-10 rounded-2xl object-cover border border-white/15 shadow-md"
+              />
+            ) : (
+              <UserAvatar
+                user={{
+                  full_name: chat.name || chat.user,
+                  name: chat.name || chat.user,
+                  avatar: chat.avatar || chat.avatar_url,
+                  avatar_url: chat.avatar || chat.avatar_url,
+                  uid: chat.otherUid || chat.id
+                }}
+                className="w-10 h-10 rounded-2xl text-sm"
+              />
+            )}
             <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0a0a0d] ${isOnline ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-neutral-600'}`} />
           </div>
 
@@ -369,17 +391,6 @@ export default function ChatWindowEnhanced({
               <h3 className="font-display font-black text-white text-sm leading-snug tracking-tight">
                 {chat.name || chat.user || 'Sports Conversation'}
               </h3>
-              {(chat.is_google_user || chat.auth_provider === 'google' || chat.email?.endsWith('@gmail.com')) && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/25 text-blue-400 text-[9px] font-extrabold uppercase tracking-wider">
-                  <svg className="w-2.5 h-2.5" viewBox="0 0 18 18" fill="none">
-                    <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
-                    <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
-                    <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71 0-.593.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
-                    <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/>
-                  </svg>
-                  Google
-                </span>
-              )}
             </div>
             <div className="text-[10px] text-neutral-400 flex items-center gap-1.5 font-light">
               {isGroup ? (
@@ -555,7 +566,7 @@ export default function ChatWindowEnhanced({
               const isSelf = (msg.senderUid === currentUserId) || (msg.sender_id === currentUserId) || msg.user === 'You' || msg.self;
               const isDeleted = Boolean(msg.isDeleted || msg.deleted_at);
               const parentMsg = (msg.replyToId ? messages.find(m => m.id === msg.replyToId) : null) || (msg.reply_to_id ? messages.find(m => m.id === msg.reply_to_id) : null);
-              const senderAvatar = msg.senderAvatar || msg.sender?.avatar_url || msg.avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=User';
+              const senderAvatar = msg.senderAvatar || msg.sender?.avatar_url || msg.avatar || '';
               const senderName = msg.senderName || msg.sender?.full_name || msg.user || 'Athlete';
 
               return (
@@ -564,10 +575,15 @@ export default function ChatWindowEnhanced({
                   className={`flex items-end gap-2 group/msg ${isSelf ? 'flex-row-reverse' : 'flex-row'}`}
                 >
                   {!isSelf && (
-                    <img
-                      src={senderAvatar}
-                      alt=""
-                      className="w-7 h-7 rounded-full object-cover border border-white/10 flex-shrink-0"
+                    <UserAvatar
+                      user={{
+                        name: senderName,
+                        full_name: senderName,
+                        avatar: senderAvatar,
+                        avatar_url: senderAvatar,
+                        uid: msg.senderUid || msg.sender_id
+                      }}
+                      className="w-7 h-7 text-[10px]"
                     />
                   )}
 

@@ -105,7 +105,7 @@ export function saveLocalMessages(conversationId, newMessages) {
 
     // Insert existing
     existing.forEach(m => {
-      const id = m.id || m.idempotency_key;
+      const id = m.id || m.idempotency_key || m.idempotencyKey;
       if (id) {
         const norm = normalizeMessage(m);
         if (norm) map.set(id, norm);
@@ -113,7 +113,7 @@ export function saveLocalMessages(conversationId, newMessages) {
     });
     // Merge new
     newMessages.forEach(m => {
-      const id = m.id || m.idempotency_key;
+      const id = m.id || m.idempotency_key || m.idempotencyKey;
       if (id) {
         const norm = normalizeMessage(m);
         if (norm) {
@@ -125,7 +125,34 @@ export function saveLocalMessages(conversationId, newMessages) {
     const merged = Array.from(map.values()).sort((a, b) => {
       return parseMsgTime(a) - parseMsgTime(b);
     });
-    localStorage.setItem(key, JSON.stringify(merged));
+
+    // Content + sender + time deduplication guard (merges duplicate optimistic & remote sends)
+    const deduped = [];
+    merged.forEach(m => {
+      const sId = m.senderUid || m.sender_id || m.senderId || m.user;
+      const text = (m.text || m.content || '').trim();
+      const mTime = new Date(m.createdAt || m.created_at || m.timestamp || 0).getTime();
+
+      const existingIdx = deduped.findIndex(item => {
+        const itemSender = item.senderUid || item.sender_id || item.senderId || item.user;
+        const itemText = (item.text || item.content || '').trim();
+        const itemTime = new Date(item.createdAt || item.created_at || item.timestamp || 0).getTime();
+        return (
+          itemSender === sId &&
+          itemText === text &&
+          text.length > 0 &&
+          Math.abs(itemTime - mTime) < 15000
+        );
+      });
+
+      if (existingIdx >= 0) {
+        deduped[existingIdx] = { ...deduped[existingIdx], ...m };
+      } else {
+        deduped.push(m);
+      }
+    });
+
+    localStorage.setItem(key, JSON.stringify(deduped));
 
     // Mirror to canonical sorted key for direct chats
     if (conversationId.startsWith('direct_')) {
@@ -133,12 +160,12 @@ export function saveLocalMessages(conversationId, newMessages) {
       if (parts.length >= 2) {
         const sortedKey = `turfington_chat_messages_direct_${[...parts].sort().join('_')}`;
         if (sortedKey !== key) {
-          localStorage.setItem(sortedKey, JSON.stringify(merged));
+          localStorage.setItem(sortedKey, JSON.stringify(deduped));
         }
       }
     }
 
-    return merged;
+    return deduped;
   } catch (e) {
     console.warn('saveLocalMessages error:', e);
     return [];
@@ -261,7 +288,7 @@ export async function ensureUserProfile(user) {
       displayName: user.displayName || user.full_name || user.name || (email ? email.split('@')[0] : 'Athlete'),
       name: user.displayName || user.full_name || user.name || (email ? email.split('@')[0] : 'Athlete'),
       email: email,
-      avatarUrl: user.avatarUrl || user.avatar || user.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`,
+      avatarUrl: user.avatarUrl || user.avatar || user.avatar_url || '',
       role: user.role || 'player',
       sport: user.sport || 'Football',
       location: user.location || 'Chennai, India',
@@ -316,8 +343,8 @@ export async function getOrCreateDirectConversation(currentUser, targetUser) {
 
   const currentName = currentUser?.displayName || currentUser?.full_name || currentUser?.name || 'Athlete';
   const targetName = targetUser?.displayName || targetUser?.full_name || targetUser?.name || 'Athlete';
-  const currentAvatar = currentUser?.avatarUrl || currentUser?.avatar || currentUser?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUid}`;
-  const targetAvatar = targetUser?.avatarUrl || targetUser?.avatar || targetUser?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${targetUid}`;
+  const currentAvatar = currentUser?.avatarUrl || currentUser?.avatar || currentUser?.avatar_url || '';
+  const targetAvatar = targetUser?.avatarUrl || targetUser?.avatar || targetUser?.avatar_url || '';
 
   // 1. Synchronously cache in local storage for BOTH users for instant offline & cross-profile access
   try {
@@ -473,7 +500,7 @@ export async function getOrCreateDirectConversation(currentUser, targetUser) {
 export async function createCommunityGroup(groupData, creatorUser) {
   const creatorUid = creatorUser?.uid || creatorUser?.id || creatorUser?.firebase_uid || auth.currentUser?.uid || 'usr_amit_patel';
   const creatorName = creatorUser?.displayName || creatorUser?.full_name || creatorUser?.name || 'Athlete';
-  const creatorAvatar = creatorUser?.avatarUrl || creatorUser?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${creatorUid}`;
+  const creatorAvatar = creatorUser?.avatarUrl || creatorUser?.avatar || '';
 
   const groupId = groupData.groupId || `group_${Date.now()}`;
   const conversationId = groupId;
@@ -770,7 +797,7 @@ export async function sendChatMessage(conversationId, senderUser, text, options 
 
   const cleanText = text.trim();
   const senderName = senderUser.displayName || senderUser.full_name || senderUser.name || 'Athlete';
-  const senderAvatar = senderUser.avatarUrl || senderUser.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${senderUid}`;
+  const senderAvatar = senderUser.avatarUrl || senderUser.avatar || senderUser.avatar_url || '';
 
   const messageId = options.messageId || options.idempotencyKey || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const nowIso = new Date().toISOString();
@@ -1025,6 +1052,9 @@ export async function sendChatMessage(conversationId, senderUser, text, options 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          id: messageId,
+          idempotencyKey: messageId,
+          idempotency_key: messageId,
           conversationId,
           senderId: senderUid,
           senderName,
@@ -1168,17 +1198,23 @@ export function getLocalInboxWithDiscovery(uid) {
     // Helper to find partner profile from local saved profiles
     const findUserProfile = (partnerId) => {
       try {
-        const keys = ['turfington_registered_users', 'turfington_saved_profiles', 'turfington_all_profiles', 'turfington_profiles'];
+        const keys = ['turfington_accounts', 'turfington_profile', 'turfington_registered_users', 'turfington_saved_profiles', 'turfington_all_profiles', 'turfington_profiles'];
         for (const k of keys) {
           const raw = localStorage.getItem(k);
           if (raw) {
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
-              const found = parsed.find(u => (u.id === partnerId || u.uid === partnerId || u.firebase_uid === partnerId));
+              const found = parsed.find(u => (
+                u && (u.id === partnerId || u.uid === partnerId || u.firebase_uid === partnerId ||
+                u.email === partnerId || u.full_name === partnerId || u.name === partnerId)
+              ));
               if (found) return found;
             } else if (typeof parsed === 'object') {
               if (parsed[partnerId]) return parsed[partnerId];
-              const val = Object.values(parsed).find(u => (u?.id === partnerId || u?.uid === partnerId || u?.firebase_uid === partnerId));
+              const val = Object.values(parsed).find(u => (
+                u && (u?.id === partnerId || u?.uid === partnerId || u?.firebase_uid === partnerId ||
+                u?.email === partnerId || u?.full_name === partnerId || u?.name === partnerId)
+              ));
               if (val) return val;
             }
           }
@@ -1190,7 +1226,10 @@ export function getLocalInboxWithDiscovery(uid) {
             if (raw) {
               const list = JSON.parse(raw);
               if (Array.isArray(list)) {
-                const found = list.find(u => (u.id === partnerId || u.uid === partnerId || u.firebase_uid === partnerId));
+                const found = list.find(u => (
+                  u && (u.id === partnerId || u.uid === partnerId || u.firebase_uid === partnerId ||
+                  u.email === partnerId || u.full_name === partnerId || u.name === partnerId)
+                ));
                 if (found) return found;
               }
             }
@@ -1224,8 +1263,7 @@ export function getLocalInboxWithDiscovery(uid) {
                 ((lastMsg.senderUid !== uid && lastMsg.senderName) ? lastMsg.senderName : null) || 
                 (msgs.find(m => m.senderUid === otherUid)?.senderName) || 'Athlete';
               const partnerAvatar = partnerProfile?.avatarUrl || partnerProfile?.avatar || partnerProfile?.avatar_url ||
-                ((lastMsg.senderUid !== uid && lastMsg.senderAvatar) ? lastMsg.senderAvatar : null) ||
-                `https://api.dicebear.com/7.x/bottts/svg?seed=${otherUid}`;
+                ((lastMsg.senderUid !== uid && lastMsg.senderAvatar) ? lastMsg.senderAvatar : null) || '';
 
               if (!existing) {
                 convMap.set(convId, {

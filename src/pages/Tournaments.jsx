@@ -164,7 +164,7 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
   const [ticketPassId, setTicketPassId] = useState('');
   const [errors, setErrors] = useState({});
 
-  const numericFee = parseInt(tournament.entryFee.replace(/[^0-9]/g, '')) || 249;
+  const numericFee = parseInt(String(tournament?.entryFee || '249').replace(/[^0-9]/g, ''), 10) || 249;
   const gst = Math.round(numericFee * 0.18);
   const totalAmount = numericFee + gst;
 
@@ -194,10 +194,41 @@ function TournamentRegistrationModal({ tournament, user, onClose, onSuccess }) {
     const passId = `TRN-${Math.floor(100000 + Math.random() * 900000)}`;
     setTicketPassId(passId);
 
+    // Save tournament registration and user booking
+    try {
+      const currentRegs = JSON.parse(localStorage.getItem('turfington_registered_tournaments') || '[]');
+      if (!currentRegs.includes(tournament?.id)) {
+        currentRegs.push(tournament?.id);
+        localStorage.setItem('turfington_registered_tournaments', JSON.stringify(currentRegs));
+      }
+      const uid = user?.uid || user?.id || user?.firebase_uid;
+      if (uid) {
+        const uKey = `turfington_user_bookings_${uid}`;
+        const userBookings = JSON.parse(localStorage.getItem(uKey) || '[]');
+        userBookings.unshift({
+          id: passId,
+          type: 'tournament',
+          title: tournament?.title || 'Tournament',
+          venue: tournament?.venue || 'Venue',
+          date: tournament?.date || 'Upcoming',
+          teamName: formData.teamName,
+          captainName: formData.captainName,
+          amount: totalAmount,
+          status: 'confirmed',
+          createdAt: new Date().toISOString()
+        });
+        localStorage.setItem(uKey, JSON.stringify(userBookings));
+      }
+    } catch (e) {
+      console.warn('Error saving tournament booking:', e);
+    }
+
     setTimeout(() => {
       setStep('success');
-      onSuccess(tournament.id);
-    }, 2000);
+      if (typeof onSuccess === 'function') {
+        onSuccess(tournament?.id);
+      }
+    }, 1200);
   };
 
   return (
@@ -770,7 +801,14 @@ function CreateTournamentForm({ onClose, onCreated }) {
 /* ─── Main Component ─────────────────────────────────── */
 export default function Tournaments({ role, user }) {
   const [activeFilter, setActiveFilter] = useState('All');
-  const [tournaments, setTournaments] = useState(TOURNAMENTS);
+  const [tournaments, setTournaments] = useState(() => {
+    try {
+      const savedRegs = JSON.parse(localStorage.getItem('turfington_registered_tournaments') || '[]');
+      return TOURNAMENTS.map(t => savedRegs.includes(t.id) ? { ...t, registered: true, filled: Math.min(t.slots, t.filled + 1) } : t);
+    } catch {
+      return TOURNAMENTS;
+    }
+  });
   const [myTournaments, setMyTournaments] = useState(MY_TOURNAMENTS);
   const [payModal, setPayModal] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);

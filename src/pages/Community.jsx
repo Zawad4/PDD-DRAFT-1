@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import SportIcon from '../components/SportIcon';
 import ChatWindowEnhanced from '../components/ChatWindowEnhanced';
+import UserAvatar from '../components/UserAvatar';
 import {
   subscribeToUserInbox,
   subscribeToCommunityGroups,
@@ -104,7 +105,7 @@ export function GroupAvatar({ group, className = "w-14 h-14 rounded-2xl", showBa
 export default function Community({ user, setTab }) {
   const currentUserId = user?.firebase_uid || user?.id || user?.uid || auth.currentUser?.uid || 'usr_guest';
   const currentUserName = user?.full_name || user?.displayName || user?.name || 'Athlete';
-  const currentUserAvatar = user?.avatar || user?.avatarUrl || user?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUserId}`;
+  const currentUserAvatar = user?.avatar || user?.avatarUrl || user?.avatar_url || '';
 
   // State
   const [inboxItems, setInboxItems] = useState([]);
@@ -294,7 +295,7 @@ export default function Community({ user, setTab }) {
     }
 
     const partnerName = chat.title || chat.name || chat.groupName || inboxEntry?.title || inboxEntry?.name || 'Athlete';
-    const partnerAvatar = isGrp ? getGroupImage(chat) : (chat.avatarUrl || chat.avatar || inboxEntry?.avatarUrl || inboxEntry?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${otherUid || 'chat'}`);
+    const partnerAvatar = isGrp ? getGroupImage(chat) : (chat.avatarUrl || chat.avatar || inboxEntry?.avatarUrl || inboxEntry?.avatar || '');
 
     const formattedChat = {
       ...chat,
@@ -998,11 +999,24 @@ export default function Community({ user, setTab }) {
                       >
                         {/* Avatar */}
                         <div className="relative flex-shrink-0">
-                          <img
-                            src={item.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${item.conversationId}`}
-                            alt={item.title}
-                            className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl object-cover border border-white/10 shadow-sm"
-                          />
+                          {item.type === 'group' ? (
+                            <img
+                              src={item.avatarUrl || getGroupImage(item)}
+                              alt={item.title}
+                              className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl object-cover border border-white/10 shadow-sm"
+                            />
+                          ) : (
+                            <UserAvatar
+                              user={{
+                                full_name: item.title,
+                                name: item.title,
+                                avatar: item.avatarUrl,
+                                avatar_url: item.avatarUrl,
+                                uid: item.otherUid
+                              }}
+                              className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl text-base"
+                            />
+                          )}
                           <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-[#101014]" />
                         </div>
 
@@ -1082,27 +1096,16 @@ export default function Community({ user, setTab }) {
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
                               <div className="relative flex-shrink-0">
-                                <img
-                                  src={athlete.avatar || athlete.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${athlete.id}`}
-                                  alt=""
-                                  className="w-9 h-9 rounded-xl object-cover border border-white/10"
+                                <UserAvatar
+                                  user={athlete}
+                                  className="w-9 h-9 rounded-xl text-xs"
                                 />
-                                {athlete.is_google_user && (
-                                  <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-blue-600 border border-black flex items-center justify-center text-[7px] text-white font-black" title="Google Verified">
-                                    G
-                                  </span>
-                                )}
                               </div>
                               <div className="truncate">
                                 <div className="flex items-center gap-1.5">
                                   <p className="text-xs font-bold text-white group-hover:text-indigo-400 transition-colors truncate">
                                     {athlete.full_name || athlete.name}
                                   </p>
-                                  {athlete.is_google_user && (
-                                    <span className="px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-400 text-[8px] font-bold">
-                                      Google
-                                    </span>
-                                  )}
                                 </div>
                                 <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 truncate mt-0.5">
                                   {playerId && (
@@ -1268,34 +1271,9 @@ export default function Community({ user, setTab }) {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAthleteFilterTab('all')}
-                    className={`px-3 py-1.5 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
-                      athleteFilterTab === 'all'
-                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                        : 'bg-white/5 text-neutral-400 hover:bg-white/10 hover:text-white border border-white/8'
-                    }`}
-                  >
-                    All Athletes ({athletes.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAthleteFilterTab('google')}
-                    className={`px-3 py-1.5 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
-                      athleteFilterTab === 'google'
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                        : 'bg-white/5 text-neutral-400 hover:bg-white/10 hover:text-white border border-white/8'
-                    }`}
-                  >
-                    <svg className="w-3 h-3" viewBox="0 0 18 18" fill="none">
-                      <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
-                      <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
-                      <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71 0-.593.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
-                      <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/>
-                    </svg>
-                    <span>Google Signed-In ({athletes.filter(a => a.is_google_user || a.auth_provider === 'google' || a.email?.endsWith('@gmail.com')).length})</span>
-                  </button>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-neutral-400">
+                    All Registered Athletes ({athletes.length})
+                  </span>
                 </div>
               </div>
 
@@ -1353,16 +1331,10 @@ export default function Community({ user, setTab }) {
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="relative flex-shrink-0">
-                            <img
-                              src={athlete.avatar || athlete.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${athlete.id}`}
-                              alt=""
-                              className="w-11 h-11 rounded-2xl object-cover border border-white/10"
+                            <UserAvatar
+                              user={athlete}
+                              className="w-11 h-11 rounded-2xl text-xs"
                             />
-                            {athlete.is_google_user && (
-                              <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-blue-600 border border-black flex items-center justify-center text-[8px] text-white font-black" title="Signed in with Google">
-                                G
-                              </span>
-                            )}
                           </div>
                           <div className="truncate">
                             <div className="flex items-center gap-2 truncate">
@@ -1372,11 +1344,6 @@ export default function Community({ user, setTab }) {
                               {playerId && (
                                 <span className="text-[10px] text-indigo-400 font-mono font-bold bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded-md">
                                   {playerId}
-                                </span>
-                              )}
-                              {athlete.is_google_user && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/15 border border-blue-500/25 text-blue-400 text-[9px] font-extrabold flex-shrink-0">
-                                  Google
                                 </span>
                               )}
                             </div>

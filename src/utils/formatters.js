@@ -50,3 +50,37 @@ export function truncateText(text, maxLength = 100) {
   return text.slice(0, maxLength).trim() + '...';
 }
 
+/**
+ * Formats a 24-hour time or time range string into a clean 12-hour AM/PM format.
+ * Examples:
+ *   "06:00" -> "6:00 AM"
+ *   "14:00" -> "2:00 PM"
+ *   "00:00" -> "12:00 AM"
+ *   "18:00 - 19:00" -> "6:00 PM – 7:00 PM"
+ *   "6:00 PM - 7:00 PM" -> "6:00 PM – 7:00 PM"
+ */
+export function formatTime12Hour(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return timeStr || '';
+
+  const formatSingle = (t) => {
+    const clean = t.trim();
+    // Already in 12-hour format?
+    if (/am|pm/i.test(clean)) return clean;
+    const match = clean.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return clean;
+    let hour = parseInt(match[1], 10);
+    const minute = match[2];
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    hour = hour % 12;
+    if (hour === 0) hour = 12;
+    return `${hour}:${minute} ${ampm}`;
+  };
+
+  if (timeStr.includes('-') || timeStr.includes('–')) {
+    const parts = timeStr.split(/[-–]/);
+    return parts.map(formatSingle).join(' – ');
+  }
+
+  return formatSingle(timeStr);
+}
+

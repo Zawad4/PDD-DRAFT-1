@@ -10,6 +10,7 @@ import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
 import { apiFetchVenues, apiCreateVenue, apiDeleteVenue, apiFetchBookings, apiUpdateBookingStatus, apiFetchOwnerBookings } from '../services/db';
 import VenueImage from '../components/VenueImage';
 import { useToast } from '../context';
+import { formatTime12Hour } from '../utils/formatters';
 
 /* ─── Reject Booking Modal ────────────────────────────── */
 function RejectBookingModal({ booking, onClose, onReject }) {
@@ -770,7 +771,7 @@ function SlotGrid({ venue, onUpdateSlot }) {
                 onClick={() => toggleSlot(time)}
                 className={`w-full px-3 py-2.5 rounded-xl border text-[10px] font-bold text-center transition-all hover:scale-105 active:scale-95 cursor-pointer select-none ${slotColor(status)}`}
               >
-                <div className="font-mono text-xs font-black mb-0.5">{time}</div>
+                <div className="font-mono text-xs font-black mb-0.5">{formatTime12Hour(time)}</div>
                 <div className="uppercase tracking-widest text-[9px] font-extrabold">{slotLabel(status)}</div>
               </button>
             </div>
@@ -789,7 +790,7 @@ function SlotGrid({ venue, onUpdateSlot }) {
               <div className="flex items-center justify-between border-b border-white/8 pb-3">
                 <div>
                   <h3 className="font-display font-black text-white text-base">Manage Slot Status</h3>
-                  <p className="text-xs text-neutral-400 font-mono mt-0.5">{selectedDay}, {selectedSlotModal.time} • {venue.name}</p>
+                  <p className="text-xs text-neutral-400 font-mono mt-0.5">{selectedDay}, {formatTime12Hour(selectedSlotModal.time)} • {venue.name}</p>
                 </div>
                 <button type="button" onClick={() => setSelectedSlotModal(null)} className="p-1.5 rounded-full bg-white/5 text-neutral-400 hover:text-white">
                   <X className="w-4 h-4" />

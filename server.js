@@ -558,7 +558,7 @@ const INITIAL_DATA = {
       chat_id: 'gc1',
       sender_id: 'usr_rahul',
       user: 'Rahul Sharma',
-      avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Rahul',
+      avatar: '',
       text: 'Awesome games at Vanguard FC turf today! Thanks for organizing guys.',
       time: '14:12',
       created_at: new Date().toISOString()
@@ -566,88 +566,7 @@ const INITIAL_DATA = {
   ],
   posts: [],
   marketplace: [],
-  player_reviews: [
-    {
-      id: 'rev_101',
-      player_id: 'usr_rahul',
-      reviewer_id: 'usr_vikram',
-      reviewer_name: 'Vikram Rao',
-      reviewer_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Vikram',
-      reviewer_sport: 'Football',
-      performance_rating: 5,
-      behaviour_rating: 5,
-      badges: ['Clutch Player', 'Fair Play Champion', 'Team Motivator'],
-      comment: 'Unreal stamina and midfield distribution! Scored the winning penalty in our Indiranagar 7v7 shootout. Always stays calm even when tackles fly in. Never argues with the referee.',
-      match_context: 'Weekend Night Champions League (Indiranagar Turf)',
-      helpful_count: 8,
-      helpful_users: [],
-      created_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString()
-    },
-    {
-      id: 'rev_102',
-      player_id: 'usr_rahul',
-      reviewer_id: 'usr_karthik',
-      reviewer_name: 'Karthik Subramanian',
-      reviewer_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Karthik',
-      reviewer_sport: 'Cricket',
-      performance_rating: 5,
-      behaviour_rating: 4,
-      badges: ['Deadly Precision', 'Always On Time'],
-      comment: 'Solid opening batsman. Arrived 15 minutes before slot time for warmups. Tremendous work rate and team ethic.',
-      match_context: 'Box Cricket Derby @ Turf Together',
-      helpful_count: 5,
-      helpful_users: [],
-      created_at: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString()
-    },
-    {
-      id: 'rev_103',
-      player_id: 'usr_rahul',
-      reviewer_id: 'usr_sneha',
-      reviewer_name: 'Sneha Reddy',
-      reviewer_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sneha',
-      reviewer_sport: 'Badminton',
-      performance_rating: 4,
-      behaviour_rating: 5,
-      badges: ['Fair Play Champion', 'Respectful Athlete'],
-      comment: 'Great mixed doubles partner! Respects calls, cheers up teammates during tough points, and shows top-tier sportsmanship.',
-      match_context: 'Smash Masters Badminton Cup',
-      helpful_count: 3,
-      helpful_users: [],
-      created_at: new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString()
-    },
-    {
-      id: 'rev_104',
-      player_id: 'usr_vikram',
-      reviewer_id: 'usr_rahul',
-      reviewer_name: 'Rahul Sharma',
-      reviewer_avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Rahul',
-      reviewer_sport: 'Football',
-      performance_rating: 5,
-      behaviour_rating: 5,
-      badges: ['Rock-Solid Defense', 'Natural Leader'],
-      comment: 'Captain material. Reads the game two steps ahead. Completely organized our defense and was gracious to the opposing team after the match.',
-      match_context: 'Chennai Football Arena Clash',
-      helpful_count: 6,
-      helpful_users: [],
-      created_at: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString()
-    },
-    {
-      id: 'rev_105',
-      player_id: 'usr_sneha',
-      reviewer_id: 'usr_priya',
-      reviewer_name: 'Priya Sharma',
-      reviewer_avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Priya',
-      reviewer_sport: 'Pickleball',
-      performance_rating: 5,
-      behaviour_rating: 5,
-      badges: ['Clutch Player', 'Fair Play Champion'],
-      comment: 'Lethal kitchen drops and incredible hand speed in Pickleball doubles! Always positive vibes on the court.',
-      match_context: 'Pickleball Summer Open',
-      helpful_count: 4,
-      helpful_users: [],
-      created_at: new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString()
-    }
-  ]
+  player_reviews: []
 };
 
 let dbCache = null;
@@ -962,73 +881,6 @@ app.post('/api/bookings', (req, res) => {
   writeDB(db);
 
   res.json({ success: true, booking: newBooking });
-});
-
-// 7. Messages
-app.get('/api/messages', (req, res) => {
-  const chatId = req.query.chatId || req.query.conversationId;
-  if (!chatId) {
-    return res.status(400).json({ success: false, error: 'chatId or conversationId parameter is required' });
-  }
-  const db = readDB();
-  if (!db.messages) db.messages = [];
-  const filtered = db.messages.filter(m => m.chat_id === chatId || m.conversation_id === chatId);
-  res.json({ success: true, messages: filtered });
-});
-
-app.post('/api/messages', (req, res) => {
-  const chatId = req.body.chatId || req.body.conversationId;
-  const content = req.body.text || req.body.content;
-  const senderId = req.body.senderId || req.body.sender_id || 'usr_anonymous';
-  const userName = req.body.user || req.body.senderName || 'Athlete';
-  const userAvatar = req.body.avatar || req.body.senderAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${senderId}`;
-
-  if (!chatId || !content) {
-    return res.status(400).json({ success: false, error: 'Chat ID and Text required' });
-  }
-
-  const db = readDB();
-  if (!db.messages) db.messages = [];
-  const newMsg = {
-    id: 'msg_' + Date.now(),
-    chat_id: chatId,
-    conversation_id: chatId,
-    sender_id: senderId,
-    user: userName,
-    sender_name: userName,
-    avatar: userAvatar,
-    text: content,
-    content: content,
-    time: req.body.time || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-    attachments: req.body.attachments || [],
-    created_at: new Date().toISOString()
-  };
-
-  db.messages.push(newMsg);
-
-  // Update chat last message
-  if (!db.chats) db.chats = [];
-  const cIdx = db.chats.findIndex(c => c.id === chatId);
-  if (cIdx >= 0) {
-    db.chats[cIdx].lastMessage = { text: content, sender_id: senderId, sender_name: userName, timestamp: Date.now() };
-    db.chats[cIdx].lastMessageText = content;
-    db.chats[cIdx].lastMessageTime = new Date().toISOString();
-    db.chats[cIdx].updated_at = new Date().toISOString();
-  } else {
-    db.chats.push({
-      id: chatId,
-      type: chatId.startsWith('dm_') ? 'direct' : 'group',
-      name: chatId,
-      lastMessage: { text: content, sender_id: senderId, sender_name: userName, timestamp: Date.now() },
-      lastMessageText: content,
-      lastMessageTime: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    });
-  }
-
-  writeDB(db);
-
-  res.json({ success: true, message: newMsg });
 });
 
 // 8. Feed Posts
@@ -1565,7 +1417,7 @@ app.post('/api/community-groups', (req, res) => {
     imageUrl: finalImage,
     creatorUid: uid,
     creatorName: cName,
-    creatorAvatar: creatorAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`,
+    creatorAvatar: creatorAvatar || '',
     visibility: 'public',
     memberCount: 1,
     members: [uid],
@@ -1610,7 +1462,7 @@ app.post('/api/community-groups', (req, res) => {
     sender_id: uid,
     senderId: uid,
     user: cName,
-    avatar: creatorAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`,
+    avatar: creatorAvatar || '',
     text: `Welcome to ${name.trim()}! Start organizing matches and discussions here.`,
     created_at: new Date().toISOString()
   });
@@ -1702,12 +1554,12 @@ app.get('/api/messages', (req, res) => {
 app.post('/api/messages', (req, res) => {
   const { chatId, conversationId, senderId, senderUid, user, senderName, avatar, senderAvatar, text, content, replyToId, reply_to_id, attachments, idempotencyKey, idempotency_key } = req.body;
   const targetChatId = chatId || conversationId;
-  const key = idempotencyKey || idempotency_key;
+  const key = idempotencyKey || idempotency_key || req.body.id || req.body.messageId;
   const rId = replyToId || reply_to_id;
   const msgText = (text || content || '').trim();
   const actualSenderId = senderId || senderUid || 'usr_me';
   const actualUser = user || senderName || 'Athlete';
-  const actualAvatar = avatar || senderAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${actualSenderId}`;
+  const actualAvatar = avatar || senderAvatar || '';
 
   if (!targetChatId || !msgText) {
     return res.status(400).json({ success: false, error: 'chatId/conversationId and text required' });
@@ -1718,12 +1570,24 @@ app.post('/api/messages', (req, res) => {
   db.chats = db.chats || [];
   db.community_groups = db.community_groups || [];
 
-  // Check idempotency
+  // 1. Check idempotency by key/id
   if (key) {
     const dup = db.messages.find(m => m.idempotency_key === key || m.idempotencyKey === key || m.id === key);
     if (dup) {
       return res.json({ success: true, message: dup, duplicate: true });
     }
+  }
+
+  // 2. Content + sender + time deduplication guard (prevents double submits within 10s window)
+  const recentDup = db.messages.find(m => {
+    const sameChat = m.chatId === targetChatId || m.chat_id === targetChatId || m.conversation_id === targetChatId;
+    const sameSender = m.senderId === actualSenderId || m.sender_id === actualSenderId || m.senderUid === actualSenderId;
+    const sameContent = (m.text === msgText || m.content === msgText);
+    const msgTime = new Date(m.created_at || m.createdAt || 0).getTime();
+    return sameChat && sameSender && sameContent && (Date.now() - msgTime < 10000);
+  });
+  if (recentDup) {
+    return res.json({ success: true, message: recentDup, duplicate: true });
   }
 
   const newMsg = {
@@ -2500,21 +2364,9 @@ app.get('/api/players/:playerId/reviews', (req, res) => {
              (r.player_email && String(r.player_email).toLowerCase() === target);
     });
 
-    // If this player doesn't have custom reviews yet, supply seed verified reviews with written comments
-    if (reviews.length === 0) {
-      const fallbackList = (allReviews.filter(r => r.player_id === 'usr_rahul').length > 0
-        ? allReviews.filter(r => r.player_id === 'usr_rahul')
-        : (INITIAL_DATA.player_reviews || []));
-      reviews = fallbackList.map((r, idx) => ({
-        ...r,
-        id: `seed_${idx}_${playerId}`,
-        player_id: playerId
-      }));
-    }
-
     const total = reviews.length;
-    let avgPerformance = 4.9;
-    let avgBehaviour = 5.0;
+    let avgPerformance = null;
+    let avgBehaviour = null;
     const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
     const badgeCounts = {};
 
@@ -2542,7 +2394,7 @@ app.get('/api/players/:playerId/reviews', (req, res) => {
       totalReviews: total,
       avgPerformance,
       avgBehaviour,
-      overallScore: total > 0 ? parseFloat(((avgPerformance + avgBehaviour) / 2).toFixed(1)) : 5.0,
+      overallScore: total > 0 ? parseFloat(((avgPerformance + avgBehaviour) / 2).toFixed(1)) : null,
       distribution,
       badgeCounts,
       reviews

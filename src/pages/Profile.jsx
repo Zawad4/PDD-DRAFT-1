@@ -245,9 +245,9 @@ export default function Profile({
   // Player Reviews & Overall Rating Data
   const [reviewsData, setReviewsData] = useState({
     totalReviews: 0,
-    avgPerformance: 5.0,
-    avgBehaviour: 5.0,
-    overallScore: 5.0,
+    avgPerformance: null,
+    avgBehaviour: null,
+    overallScore: null,
     distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
     reviews: []
   });
@@ -256,14 +256,21 @@ export default function Profile({
   useEffect(() => {
     const targetPlayerId = user?.id || user?.firebase_uid || user?.email || 'usr_me';
     apiFetchPlayerReviews(targetPlayerId).then(data => {
-      if (data && data.success && Array.isArray(data.reviews) && data.reviews.length > 0) {
-        setReviewsData(data);
+      if (data && data.success) {
+        setReviewsData({
+          totalReviews: data.totalReviews || (data.reviews?.length || 0),
+          avgPerformance: data.avgPerformance,
+          avgBehaviour: data.avgBehaviour,
+          overallScore: data.overallScore,
+          distribution: data.distribution || { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
+          reviews: data.reviews || []
+        });
       }
     });
   }, [user?.id, user?.firebase_uid, user?.email]);
 
-  const ratingScore = reviewsData?.overallScore || 4.9;
-  const ratingStyle = getRatingColor(ratingScore);
+  const ratingScore = reviewsData?.overallScore || (reviewsData?.totalReviews > 0 ? 5.0 : null);
+  const ratingStyle = getRatingColor(ratingScore || 5.0);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -547,16 +554,33 @@ export default function Profile({
                 <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-400 font-bold">
                   Overall Rating
                 </span>
-                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${ratingStyle.border} ${ratingStyle.bgMuted} ${ratingStyle.text}`}>
-                  {ratingStyle.label}
-                </span>
+                {reviewsData.totalReviews > 0 ? (
+                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${ratingStyle.border} ${ratingStyle.bgMuted} ${ratingStyle.text}`}>
+                    {ratingStyle.label}
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-white/10 bg-white/5 text-neutral-400">
+                    New Member
+                  </span>
+                )}
               </div>
               <div className="flex items-baseline space-x-3 pt-1">
-                <span className={`font-display font-black text-4xl tracking-tight transition-colors ${ratingStyle.text}`}>
-                  {ratingScore}★
-                </span>
-                <span className="text-sm font-medium text-neutral-400">/ 5.0 Rating</span>
-                <span className="text-xs text-neutral-500">• Based on {reviewsData.totalReviews ?? reviewsData.reviews?.length ?? 0} verified match reviews</span>
+                {reviewsData.totalReviews > 0 ? (
+                  <>
+                    <span className={`font-display font-black text-4xl tracking-tight transition-colors ${ratingStyle.text}`}>
+                      {ratingScore}★
+                    </span>
+                    <span className="text-sm font-medium text-neutral-400">/ 5.0 Rating</span>
+                    <span className="text-xs text-neutral-500">• Based on {reviewsData.totalReviews} verified match reviews</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-display font-black text-2xl tracking-tight text-neutral-300">
+                      No reviews yet
+                    </span>
+                    <span className="text-xs text-neutral-500">• Be the first teammate to leave a review</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -635,85 +659,95 @@ export default function Profile({
               <div className="px-6 py-3.5 bg-white/[0.02] border-b border-white/5 flex items-center justify-between">
                 <div className="flex items-center space-x-3">
                   <span className={`text-2xl font-black font-display ${ratingStyle.text}`}>
-                    {ratingScore}★
+                    {ratingScore ? `${ratingScore}★` : '—'}
                   </span>
                   <div>
                     <p className="text-xs font-bold text-white">Overall Rating</p>
                     <p className="text-[10px] text-neutral-400">
-                      {reviewsData.totalReviews || 4} verified peer endorsements
+                      {reviewsData.totalReviews || 0} verified peer endorsements
                     </p>
                   </div>
                 </div>
                 <div className={`px-3 py-1 rounded-full border ${ratingStyle.border} ${ratingStyle.bgMuted} ${ratingStyle.text} text-xs font-bold`}>
-                  {ratingStyle.label}
+                  {reviewsData.totalReviews > 0 ? ratingStyle.label : 'New Member'}
                 </div>
               </div>
 
               {/* Scrollable Reviews List with Written Comments */}
               <div className="p-6 space-y-4 overflow-y-auto flex-1">
-                {(reviewsData.reviews && reviewsData.reviews.length > 0 ? reviewsData.reviews : []).map((rev) => {
-                  const revScore = rev.performance_rating || 5;
-                  const revStyle = getRatingColor(revScore);
-                  return (
-                    <div
-                      key={rev.id}
-                      className="p-5 rounded-2xl border border-white/5 bg-neutral-900/80 hover:border-white/15 space-y-3 transition-colors"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <img
-                            src={rev.reviewer_avatar}
-                            alt={rev.reviewer_name}
-                            className="w-10 h-10 rounded-full object-cover border border-white/10 bg-neutral-800"
-                          />
-                          <div>
-                            <div className="flex items-center space-x-2">
-                              <h4 className="font-bold text-white text-sm">{rev.reviewer_name}</h4>
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/5 text-neutral-300 border border-white/10">
-                                {rev.reviewer_sport || 'Football'}
-                              </span>
+                {(!reviewsData.reviews || reviewsData.reviews.length === 0) ? (
+                  <div className="py-16 text-center text-neutral-400 space-y-3">
+                    <MessageSquare className="w-10 h-10 mx-auto text-neutral-600 mb-2" />
+                    <h4 className="font-display font-bold text-white text-base">No reviews yet</h4>
+                    <p className="text-xs text-neutral-400 max-w-xs mx-auto">
+                      No reviews yet for this athlete. Genuine peer reviews will appear here once written by fellow athletes.
+                    </p>
+                  </div>
+                ) : (
+                  reviewsData.reviews.map((rev) => {
+                    const revScore = rev.performance_rating || 5;
+                    const revStyle = getRatingColor(revScore);
+                    return (
+                      <div
+                        key={rev.id}
+                        className="p-5 rounded-2xl border border-white/5 bg-neutral-900/80 hover:border-white/15 space-y-3 transition-colors"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3">
+                            <img
+                              src={rev.reviewer_avatar}
+                              alt={rev.reviewer_name}
+                              className="w-10 h-10 rounded-full object-cover border border-white/10 bg-neutral-800"
+                            />
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <h4 className="font-bold text-white text-sm">{rev.reviewer_name}</h4>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/5 text-neutral-300 border border-white/10">
+                                  {rev.reviewer_sport || 'Football'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-neutral-500 font-light mt-0.5">
+                                {rev.match_context || 'Verified Match'} • {new Date(rev.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </p>
                             </div>
-                            <p className="text-[10px] text-neutral-500 font-light mt-0.5">
-                              {rev.match_context || 'Verified Match'} • {new Date(rev.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                            </p>
+                          </div>
+
+                          <div className={`px-2.5 py-1 rounded-full border ${revStyle.border} ${revStyle.bgMuted} ${revStyle.text} text-xs font-bold flex items-center space-x-1`}>
+                            <Star className={`w-3.5 h-3.5 ${revStyle.starFill}`} />
+                            <span>{revScore}★</span>
                           </div>
                         </div>
 
-                        <div className={`px-2.5 py-1 rounded-full border ${revStyle.border} ${revStyle.bgMuted} ${revStyle.text} text-xs font-bold flex items-center space-x-1`}>
-                          <Star className={`w-3.5 h-3.5 ${revStyle.starFill}`} />
-                          <span>{revScore}★</span>
+                        {/* The Written Comment Quote */}
+                        <div className="p-3.5 rounded-xl bg-white/[0.03] border-l-2 border-white/20">
+                          <p className="text-xs text-neutral-200 leading-relaxed italic">
+                            "{rev.comment}"
+                          </p>
                         </div>
-                      </div>
 
-                      {/* The Written Comment Quote */}
-                      <div className="p-3.5 rounded-xl bg-white/[0.03] border-l-2 border-white/20">
-                        <p className="text-xs text-neutral-200 leading-relaxed italic">
-                          "{rev.comment}"
-                        </p>
+                        {/* Badges Awarded */}
+                        {rev.badges && rev.badges.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {rev.badges.map((bName) => (
+                              <span
+                                key={bName}
+                                className="text-[10px] px-2.5 py-0.5 rounded-lg bg-white/5 border border-white/10 text-neutral-300 font-medium"
+                              >
+                                🏅 {bName}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
-
-                      {/* Badges Awarded */}
-                      {rev.badges && rev.badges.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 pt-1">
-                          {rev.badges.map((bName) => (
-                            <span
-                              key={bName}
-                              className="text-[10px] px-2.5 py-0.5 rounded-lg bg-white/5 border border-white/10 text-neutral-300 font-medium"
-                            >
-                              🏅 {bName}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
 
               {/* Modal Footer with tab switcher button */}
               <div className="p-4 border-t border-white/10 bg-neutral-900/90 flex items-center justify-between">
                 <span className="text-xs text-neutral-400">
-                  Showing {reviewsData.reviews?.length || 4} written peer comments
+                  Showing {reviewsData.reviews?.length || 0} written peer comments
                 </span>
                 <button
                   onClick={() => {

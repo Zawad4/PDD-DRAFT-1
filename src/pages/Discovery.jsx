@@ -13,6 +13,7 @@ import { apiFetchTurfs, apiFetchNearbyTurfs, apiCreateBooking, apiUpdateBookingS
 import { openRazorpayCheckout } from '../services/razorpay';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
 import { useToast } from '../context';
+import { formatTime12Hour } from '../utils/formatters';
 
 /* ── Sport Capacity Presets & Rules ──────────────────────── */
 export const SPORT_CAPACITY_PRESETS = [
@@ -1985,7 +1986,7 @@ export default function Discovery({
                                   : 'bg-emerald-950/50 border-emerald-500/40 text-emerald-400 hover:bg-emerald-900/60 hover:border-emerald-400 hover:scale-105'
                               }`}
                             >
-                              <div className="font-mono text-xs font-black mb-0.5">{slot.time}</div>
+                              <div className="font-mono text-xs font-black mb-0.5">{formatTime12Hour(slot.time)}</div>
                               <div className="uppercase tracking-widest text-[9px] font-black">
                                 {isBooked ? 'BOOKED' : 'OPEN'}
                               </div>
@@ -2189,7 +2190,7 @@ export default function Discovery({
                         ? `Join Match & Pay Split (₹${Math.round(chosenSlot.price / (chosenSlot.capacity || 10))})`
                         : bookingType === 'open_match'
                         ? `Host Match (${hostCapacity - myExistingCount} Spots Open) • Pay at Venue (₹${chosenSlot.price})`
-                        : `Book ${chosenSlot.time} (₹${chosenSlot.price})`}
+                        : `Book ${formatTime12Hour(chosenSlot.time)} (₹${chosenSlot.price})`}
                     </span>
                     <ChevronRight className="w-4 h-4" />
                   </button>
