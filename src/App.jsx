@@ -69,7 +69,10 @@ export default function App() {
 
   /* ── Global State Hub ─────────────────────────────────────── */
   const [cart, setCart] = useState(() => loadLocalState('turfington_cart', []));
-  const [likedProducts, setLikedProducts] = useState(() => loadLocalState('turfington_liked_products', []));
+  const [likedProducts, setLikedProducts] = useState(() => {
+    const loaded = loadLocalState('turfington_liked_products', []);
+    return Array.isArray(loaded) ? loaded : [];
+  });
 
   const [venueOffers, setVenueOffers] = useState(() =>
     loadLocalState('turfington_venue_offers', [
@@ -443,9 +446,29 @@ export default function App() {
             )}
             {activeTab === 'marketplace' && (
               <Marketplace
-                likedProducts={likedProducts}
+                likedProducts={Array.isArray(likedProducts) ? likedProducts : []}
                 setLikedProducts={setLikedProducts}
                 user={user}
+                setTab={handleNavClick}
+                onContactSeller={(item) => {
+                  if (!item) return;
+                  const sellerNameStr = typeof item.sellerName === 'string' && item.sellerName.trim() ? item.sellerName : 'Gear Seller';
+                  const sellerId = item.seller_id || item.sellerId || 'seller_' + sellerNameStr.toLowerCase().replace(/\s+/g, '_');
+                  const sellerTarget = {
+                    id: sellerId,
+                    firebase_uid: sellerId,
+                    full_name: sellerNameStr,
+                    name: sellerNameStr,
+                    displayName: sellerNameStr,
+                    avatar: item.sellerAvatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
+                    avatarUrl: item.sellerAvatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
+                    role: 'player'
+                  };
+                  try {
+                    localStorage.setItem('turfington_target_chat_user', JSON.stringify(sellerTarget));
+                  } catch {}
+                  handleNavClick('community');
+                }}
               />
             )}
             {activeTab === 'community' && <Community user={user} setTab={handleNavClick} />}

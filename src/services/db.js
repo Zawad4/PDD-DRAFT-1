@@ -3026,48 +3026,109 @@ export async function apiLikePost(postId, userId) {
   return { success: true };
 }
 
-const INITIAL_MARKETPLACE_ITEMS = [];
+const INITIAL_MARKETPLACE_ITEMS = [
+  {
+    id: 'mp_item_1',
+    name: 'Stealth Pro Aero Turf Shoes',
+    category: 'Shoes',
+    image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=400',
+    image_url: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=400',
+    price: 3499,
+    tag: 'Pre-owned (Like New)',
+    condition: 'Pre-owned (Like New)',
+    description: 'Pre-owned athletic shoes with professional carbon plate inserts. Excellent grip for synthetic turf.',
+    seller_id: 'usr_seller_1',
+    sellerName: 'Kabir Verma',
+    sellerAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'mp_item_2',
+    name: 'English Willow Cricket Bat (Grade 1)',
+    category: 'Equipment',
+    image: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?q=80&w=400',
+    image_url: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?q=80&w=400',
+    price: 4999,
+    tag: 'New (Sealed Pack)',
+    condition: 'New (Sealed Pack)',
+    description: 'Professional grade 1 English Willow cricket bat with chevron grip and protective toe guard.',
+    seller_id: 'usr_seller_2',
+    sellerName: 'Rohan Sharma',
+    sellerAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'mp_item_3',
+    name: 'Yonex Arcsaber 11 Pro Racket',
+    category: 'Rackets',
+    image: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=400',
+    image_url: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=400',
+    price: 2800,
+    tag: 'Pre-owned (Good)',
+    condition: 'Pre-owned (Good)',
+    description: 'Even balance badminton racket strung with BG80 Power at 26 lbs. Minor scuffs on frame.',
+    seller_id: 'usr_seller_3',
+    sellerName: 'Priya Iyer',
+    sellerAvatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'mp_item_4',
+    name: 'Official FIFA Match Football',
+    category: 'Equipment',
+    image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=400',
+    image_url: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=400',
+    price: 1200,
+    tag: 'New (Sealed Pack)',
+    condition: 'New (Sealed Pack)',
+    description: 'Thermally bonded seamless surface match ball. Includes ball net and needle.',
+    seller_id: 'usr_seller_4',
+    sellerName: 'Aditya Nair',
+    sellerAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Aditya',
+    created_at: new Date().toISOString()
+  }
+];
 
 export async function apiFetchMarketplaceItems() {
   let localItems = [];
   try {
     const s = localStorage.getItem('turfington_marketplace_items');
-    localItems = s ? JSON.parse(s) : [];
+    if (s) {
+      const parsed = JSON.parse(s);
+      localItems = Array.isArray(parsed) ? parsed : [];
+    } else {
+      localItems = INITIAL_MARKETPLACE_ITEMS;
+    }
   } catch {
-    localItems = [];
+    localItems = INITIAL_MARKETPLACE_ITEMS;
   }
 
-  // Purge any legacy mock items so only authentic items uploaded by users remain
-  localItems = localItems.filter(item => 
-    item &&
-    !['mp_1', 'mp_2', 'mp_3', 'mp_4'].includes(item.id) &&
-    item.sellerName !== 'Deepak Kumar' &&
-    item.sellerName !== 'Amit Patel' &&
-    item.sellerName !== 'Pooja Reddy' &&
-    item.sellerName !== 'Rahul Sharma'
-  );
+  // Safety fallback if empty or invalid
+  if (!Array.isArray(localItems) || localItems.length === 0) {
+    localItems = INITIAL_MARKETPLACE_ITEMS;
+  }
+
+  // Ensure every item is a valid object with an id
+  localItems = localItems.filter(item => item && typeof item === 'object' && item.id);
 
   try {
     const snap = await getDocs(collection(db, 'marketplace_items'));
     if (!snap.empty) {
       const dbItems = snap.docs.map(item => ({ id: item.id, ...item.data() }));
-      const cleanDbItems = dbItems.filter(item => 
-        item &&
-        !['mp_1', 'mp_2', 'mp_3', 'mp_4'].includes(item.id) &&
-        item.sellerName !== 'Deepak Kumar' &&
-        item.sellerName !== 'Amit Patel' &&
-        item.sellerName !== 'Pooja Reddy' &&
-        item.sellerName !== 'Rahul Sharma'
-      );
+      const cleanDbItems = dbItems.filter(item => item && typeof item === 'object' && item.id);
       const map = new Map();
-      [...cleanDbItems, ...localItems].forEach(item => map.set(item.id, item));
+      [...cleanDbItems, ...localItems].forEach(item => {
+        if (item && item.id) map.set(item.id, item);
+      });
       const merged = Array.from(map.values());
       try {
         localStorage.setItem('turfington_marketplace_items', JSON.stringify(merged));
       } catch {}
       return merged;
     }
-  } catch (err) {}
+  } catch (err) {
+    console.warn('apiFetchMarketplaceItems remote fetch warning:', err);
+  }
 
   try {
     localStorage.setItem('turfington_marketplace_items', JSON.stringify(localItems));
@@ -3079,15 +3140,16 @@ export async function apiFetchMarketplaceItems() {
 export async function apiCreateMarketplaceItem(itemData) {
   const newItem = {
     id: 'mp_' + Date.now(),
-    name: itemData.name,
-    category: itemData.category,
-    price: itemData.price,
+    name: itemData.name || 'Sports Equipment',
+    category: itemData.category || 'Equipment',
+    price: Number(itemData.price) || 0,
     condition: itemData.condition || 'New (Sealed Pack)',
     tag: itemData.condition || 'New (Sealed Pack)',
-    description: itemData.description,
+    description: itemData.description || '',
     image: itemData.image_url || itemData.image || 'https://images.unsplash.com/photo-1511067007398-7e4b90cfa4bc?q=80&w=400',
+    image_url: itemData.image_url || itemData.image || 'https://images.unsplash.com/photo-1511067007398-7e4b90cfa4bc?q=80&w=400',
     seller_id: itemData.seller_id || 'usr_me',
-    sellerName: itemData.sellerName || 'Community Athlete',
+    sellerName: typeof itemData.sellerName === 'string' ? itemData.sellerName : 'Community Athlete',
     sellerAvatar: itemData.sellerAvatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Athlete',
     isUserCreated: true,
     created_at: new Date().toISOString()
@@ -3095,21 +3157,26 @@ export async function apiCreateMarketplaceItem(itemData) {
 
   try {
     const existingStr = localStorage.getItem('turfington_marketplace_items');
-    const existing = existingStr ? JSON.parse(existingStr) : [];
-    const cleanExisting = existing.filter(item => 
-      item &&
-      !['mp_1', 'mp_2', 'mp_3', 'mp_4'].includes(item.id) &&
-      item.sellerName !== 'Deepak Kumar'
-    );
-    const updated = [newItem, ...cleanExisting];
+    let existing = [];
+    if (existingStr) {
+      const parsed = JSON.parse(existingStr);
+      existing = Array.isArray(parsed) ? parsed : [];
+    } else {
+      existing = INITIAL_MARKETPLACE_ITEMS;
+    }
+    const updated = [newItem, ...existing.filter(i => i && i.id !== newItem.id)];
     localStorage.setItem('turfington_marketplace_items', JSON.stringify(updated));
-  } catch {}
+  } catch (err) {
+    console.warn('localStorage save item warning:', err);
+  }
 
-  addDoc(collection(db, 'marketplace_items'), {
-    ...itemData,
-    ...newItem,
-    createdAt: serverTimestamp()
-  }).catch(() => {});
+  try {
+    addDoc(collection(db, 'marketplace_items'), {
+      ...itemData,
+      ...newItem,
+      createdAt: serverTimestamp()
+    }).catch(() => {});
+  } catch {}
 
   return { success: true, item: newItem };
 }
@@ -3117,13 +3184,22 @@ export async function apiCreateMarketplaceItem(itemData) {
 export async function apiUpdateMarketplaceItem(itemId, updatedData) {
   try {
     const existingStr = localStorage.getItem('turfington_marketplace_items');
-    const existing = existingStr ? JSON.parse(existingStr) : [];
-    const updated = existing.map(item => item.id === itemId ? { ...item, ...updatedData } : item);
+    let existing = [];
+    if (existingStr) {
+      const parsed = JSON.parse(existingStr);
+      existing = Array.isArray(parsed) ? parsed : [];
+    } else {
+      existing = INITIAL_MARKETPLACE_ITEMS;
+    }
+    const updated = existing.map(item => item && item.id === itemId ? { ...item, ...updatedData } : item);
     localStorage.setItem('turfington_marketplace_items', JSON.stringify(updated));
-  } catch {}
+  } catch (err) {
+    console.warn('localStorage update warning:', err);
+  }
 
-  deleteDoc(doc(db, 'marketplace_items', itemId)).catch(() => {});
-  setDoc(doc(db, 'marketplace_items', itemId), updatedData, { merge: true }).catch(() => {});
+  try {
+    setDoc(doc(db, 'marketplace_items', itemId), updatedData, { merge: true }).catch(() => {});
+  } catch {}
 
   return { success: true };
 }
@@ -3131,12 +3207,20 @@ export async function apiUpdateMarketplaceItem(itemId, updatedData) {
 export async function apiDeleteMarketplaceItem(itemId) {
   try {
     const existingStr = localStorage.getItem('turfington_marketplace_items');
-    const existing = existingStr ? JSON.parse(existingStr) : [];
-    const updated = existing.filter(item => item.id !== itemId);
+    let existing = [];
+    if (existingStr) {
+      const parsed = JSON.parse(existingStr);
+      existing = Array.isArray(parsed) ? parsed : [];
+    }
+    const updated = existing.filter(item => item && item.id !== itemId);
     localStorage.setItem('turfington_marketplace_items', JSON.stringify(updated));
-  } catch {}
+  } catch (err) {
+    console.warn('localStorage delete warning:', err);
+  }
 
-  deleteDoc(doc(db, 'marketplace_items', itemId)).catch(() => {});
+  try {
+    deleteDoc(doc(db, 'marketplace_items', itemId)).catch(() => {});
+  } catch {}
 
   return { success: true };
 }

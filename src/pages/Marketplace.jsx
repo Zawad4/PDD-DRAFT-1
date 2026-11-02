@@ -26,6 +26,7 @@ export default function Marketplace({
   likedProducts = [], 
   setLikedProducts,
   user,
+  setTab,
   onContactSeller
 }) {
   const [activeSection, setActiveSection] = useState('browse'); // 'browse' or 'sell'
@@ -60,44 +61,88 @@ export default function Marketplace({
   });
 
   const [productsList, setProductsList] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
     const fetchItems = async () => {
-      const items = await apiFetchMarketplaceItems();
-      if (items && items.length > 0) {
-        setProductsList(items);
+      try {
+        setIsLoading(true);
+        const items = await apiFetchMarketplaceItems();
+        if (active && Array.isArray(items)) {
+          setProductsList(items);
+        }
+      } catch (err) {
+        console.warn('Failed to load marketplace items:', err);
+      } finally {
+        if (active) setIsLoading(false);
       }
     };
     fetchItems();
+    return () => { active = false; };
   }, []);
 
   const categories = ['All', 'Equipment', 'Jerseys', 'Shoes', 'Accessories', 'Rackets', 'Bowling gear'];
 
+  const safeLikedProducts = Array.isArray(likedProducts) ? likedProducts : [];
+  const safeProductsList = (Array.isArray(productsList) ? productsList : []).filter(
+    p => p && typeof p === 'object' && p.id
+  );
+
   const filteredProducts = selectedCategory === 'All' 
-    ? productsList 
-    : productsList.filter(p => p.category === selectedCategory);
+    ? safeProductsList 
+    : safeProductsList.filter(p => p && p.category === selectedCategory);
 
   const isItemOwner = (p) => {
-    if (!p) return false;
-    const currentUserId = user?.id || user?.uid || user?.username || 'usr_me';
-    const currentUserName = user?.full_name || user?.name || 'You';
-    return (
-      (user?.id && p.seller_id === user.id) ||
-      (user?.uid && p.seller_id === user.uid) ||
-      p.seller_id === currentUserId ||
-      p.seller_id === 'usr_me' ||
-      p.sellerName === 'You' ||
-      p.sellerName === currentUserName ||
+    if (!p || !user) return false;
+    const currentUserId = user?.id || user?.uid || user?.firebase_uid;
+    const currentUserName = user?.full_name || user?.name || user?.username;
+    
+    return Boolean(
+      (currentUserId && (p.seller_id === currentUserId || p.userId === currentUserId || p.sellerId === currentUserId)) ||
+      (currentUserName && (p.sellerName === currentUserName || p.sellerName === 'You')) ||
       p.isMine === true
     );
   };
 
   const toggleWishlist = (productId) => {
-    setLikedProducts(prev => 
-      prev.includes(productId) 
-        ? prev.filter(id => id !== productId) 
-        : [...prev, productId]
-    );
+    if (typeof setLikedProducts === 'function') {
+      setLikedProducts(prev => {
+        const arr = Array.isArray(prev) ? prev : [];
+        return arr.includes(productId) 
+          ? arr.filter(id => id !== productId) 
+          : [...arr, productId];
+      });
+    }
+  };
+
+  const handleContactSellerAction = (p) => {
+    if (!p) return;
+    if (typeof onContactSeller === 'function') {
+      onContactSeller(p);
+      return;
+    }
+
+    const sellerNameStr = typeof p.sellerName === 'string' && p.sellerName.trim() ? p.sellerName : 'Gear Seller';
+    const sellerId = p.seller_id || p.sellerId || 'seller_' + sellerNameStr.toLowerCase().replace(/\s+/g, '_');
+    const sellerTarget = {
+      id: sellerId,
+      firebase_uid: sellerId,
+      full_name: sellerNameStr,
+      name: sellerNameStr,
+      displayName: sellerNameStr,
+      avatar: p.sellerAvatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
+      avatarUrl: p.sellerAvatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
+      role: 'player'
+    };
+
+    try {
+      localStorage.setItem('turfington_target_chat_user', JSON.stringify(sellerTarget));
+    } catch {}
+
+    if (typeof setTab === 'function') {
+      setTab('community');
+    }
   };
 
   const handleImageUpload = (e, setImg, setPrev) => {
@@ -294,9 +339,10 @@ export default function Marketplace({
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
               {filteredProducts.map(p => {
-              const isLiked = likedProducts.includes(p.id);
+              const isLiked = safeLikedProducts.includes(p.id);
               const tagColors = getTagColors(p.tag || p.condition);
               const isMine = isItemOwner(p);
+              const sellerDisplayName = typeof p.sellerName === 'string' && p.sellerName.trim() ? p.sellerName : 'Community Member';
 
               return (
                 <div 
@@ -305,8 +351,8 @@ export default function Marketplace({
                 >
                   <div className="h-60 overflow-hidden relative bg-neutral-900/50">
                     <img 
-                      src={p.image || p.image_url} 
-                      alt={p.name} 
+                      src={p.image || p.image_url || 'https://images.unsplash.com/photo-1511067007398-7e4b90cfa4bc?q=80&w=400'} 
+                      alt={p.name || 'Sports Equipment'} 
                       className="w-full h-full object-cover group-hover:scale-105 transition-all duration-500"
                     />
                     
@@ -371,23 +417,23 @@ export default function Marketplace({
                       <div className="flex justify-between items-center mb-2.5">
                         <div className="flex items-center space-x-1.5">
                           {p.sellerAvatar ? (
-                            <img src={p.sellerAvatar} className="w-4.5 h-4.5 rounded-full object-cover border border-white/10" alt={p.sellerName} />
+                            <img src={p.sellerAvatar} className="w-4.5 h-4.5 rounded-full object-cover border border-white/10" alt={sellerDisplayName} />
                           ) : (
                             <div className="w-4.5 h-4.5 rounded-full bg-indigo-600 flex items-center justify-center text-[8px] font-bold text-white">
-                              {p.sellerName?.[0] || 'S'}
+                              {sellerDisplayName[0] || 'S'}
                             </div>
                           )}
                           <span className="text-[10px] text-neutral-400 font-bold truncate max-w-[120px]">
-                            {isMine ? 'You (Owner)' : p.sellerName || 'Seller'}
+                            {isMine ? 'You (Owner)' : sellerDisplayName}
                           </span>
                         </div>
                         <span className="text-[9px] uppercase tracking-wider text-neutral-500 font-extrabold">
-                          {p.category}
+                          {p.category || 'Gear'}
                         </span>
                       </div>
 
                       <h3 className="font-display font-bold text-white text-base leading-snug group-hover:text-neutral-200 transition-colors">
-                        {p.name}
+                        {p.name || 'Equipment'}
                       </h3>
 
                       {p.description && (
@@ -400,7 +446,7 @@ export default function Marketplace({
                     {/* Card Footer: Price & Owner Action / Chat Action */}
                     <div className="flex justify-between items-center pt-4 border-t border-white/5">
                       <span className="font-display font-black text-lg text-white">
-                        ₹{p.price ? p.price.toLocaleString('en-IN') : '0'}
+                        ₹{p.price ? Number(p.price).toLocaleString('en-IN') : '0'}
                       </span>
                       
                       {isMine ? (
@@ -437,7 +483,7 @@ export default function Marketplace({
                       ) : (
                         <button 
                           type="button"
-                          onClick={() => onContactSeller(p)}
+                          onClick={() => handleContactSellerAction(p)}
                           className="inline-flex items-center space-x-1.5 px-4.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-full transition-colors shadow-[0_0_12px_rgba(99,102,241,0.2)] cursor-pointer"
                         >
                           <MessageSquare className="w-3.5 h-3.5" />
@@ -658,7 +704,7 @@ export default function Marketplace({
               <div className="flex items-center justify-between border-b border-white/8 pb-4">
                 <div>
                   <h3 className="font-display font-black text-white text-lg uppercase tracking-tight">Edit Your Listing</h3>
-                  <p className="text-xs text-neutral-400 mt-0.5">Update details for {editingProduct.name}</p>
+                  <p className="text-xs text-neutral-400 mt-0.5">Update details for {editingProduct?.name || 'Listing'}</p>
                 </div>
                 <button type="button" onClick={() => setEditingProduct(null)} className="p-2 rounded-full bg-white/5 text-neutral-400 hover:text-white">
                   <X className="w-4 h-4" />
@@ -803,8 +849,8 @@ export default function Marketplace({
               </div>
 
               <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl space-y-1 text-xs">
-                <p className="font-bold text-white">{deletingProduct.name}</p>
-                <p className="text-neutral-400">Category: {deletingProduct.category} • Price: ₹{deletingProduct.price}</p>
+                <p className="font-bold text-white">{deletingProduct?.name || 'Listing'}</p>
+                <p className="text-neutral-400">Category: {deletingProduct?.category || 'Equipment'} • Price: ₹{deletingProduct?.price ? Number(deletingProduct.price).toLocaleString('en-IN') : '0'}</p>
               </div>
 
               <p className="text-xs text-neutral-400 font-light leading-relaxed">
