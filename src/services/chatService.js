@@ -183,80 +183,19 @@ export function appendLocalMessage(conversationId, msg) {
 /**
  * Default community sports groups to seed
  */
-export const DEFAULT_COMMUNITY_GROUPS_CONFIG = [
-  {
-    groupId: 'group_football_chennai',
-    name: '⚽ Chennai Football Turf Hub',
-    description: 'Weekly 7v7 turf matches, tactical meetups, and friendly amateur leagues across Chennai.',
-    sportCategory: 'Football',
-    locationReference: 'Chennai, Tamil Nadu',
-    imageUrl: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=600',
-    creatorUid: 'turfington_official',
-    visibility: 'public',
-    memberCount: 48,
-    initialMessage: 'Welcome to Chennai Football Turf Hub! Share match plans, assemble squads, and book turfs.'
-  },
-  {
-    groupId: 'group_box_cricket',
-    name: '🏏 Box Cricket Warriors',
-    description: 'Fast-paced box cricket tournaments, night matches, and weekend nets. Batsmen & bowlers welcome!',
-    sportCategory: 'Cricket',
-    locationReference: 'Poonamallee, Chennai',
-    imageUrl: 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?q=80&w=600',
-    creatorUid: 'turfington_official',
-    visibility: 'public',
-    memberCount: 62,
-    initialMessage: 'Looking for box cricket players? Connect with teams and arrange weekend matches here!'
-  },
-  {
-    groupId: 'group_badminton_smashers',
-    name: '🏸 Smashers Badminton Club',
-    description: 'Wooden and synthetic court doubles, high-intensity rallies, and morning coaching sessions.',
-    sportCategory: 'Badminton',
-    locationReference: 'Porur, Chennai',
-    imageUrl: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=600',
-    creatorUid: 'turfington_official',
-    visibility: 'public',
-    memberCount: 35,
-    initialMessage: 'Smashers Badminton Club: Find doubles partners and organize court sessions.'
-  },
-  {
-    groupId: 'group_pickleball_padel',
-    name: '🎾 Padel & Pickleball Aces',
-    description: 'Chennai’s premier racket community. Discover paddle sports, casual doubles, and coaching drills.',
-    sportCategory: 'Pickleball',
-    locationReference: 'Anna Nagar, Chennai',
-    imageUrl: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?q=80&w=600',
-    creatorUid: 'turfington_official',
-    visibility: 'public',
-    memberCount: 27,
-    initialMessage: 'Welcome paddle & pickleball enthusiasts! Find partners and discuss the fastest growing sports.'
-  },
-  {
-    groupId: 'group_table_tennis',
-    name: '🏓 Table Tennis Spinners',
-    description: 'Ping pong enthusiasts, spin-masters, and local tournament coordination.',
-    sportCategory: 'Table Tennis',
-    locationReference: 'T. Nagar, Chennai',
-    imageUrl: 'https://images.unsplash.com/photo-1611251135345-18c56206b863?q=80&w=600',
-    creatorUid: 'turfington_official',
-    visibility: 'public',
-    memberCount: 19,
-    initialMessage: 'Practice loops, rallies, and weekly table tennis matchups across city centers.'
-  },
-  {
-    groupId: 'group_strike_bowling',
-    name: '🎳 Strike Bowling Squad',
-    description: '10-pin bowling nights, high score leaderboards, and weekend squad socials.',
-    sportCategory: 'Bowling',
-    locationReference: 'Velachery, Chennai',
-    imageUrl: '/bowling_group.jpg',
-    creatorUid: 'turfington_official',
-    visibility: 'public',
-    memberCount: 22,
-    initialMessage: 'Strike Bowling Squad: Coordinate weekend 10-pin sessions and team tournaments!'
-  }
-];
+export const SYSTEM_DEFAULT_GROUP_IDS = new Set([
+  'group_football_chennai',
+  'group_box_cricket',
+  'group_badminton_smashers',
+  'group_pickleball_padel',
+  'group_pickleball_chennai',
+  'group_table_tennis',
+  'group_table_tennis_warriors',
+  'group_strike_bowling',
+  'group_bowling_strikes'
+]);
+
+export const DEFAULT_COMMUNITY_GROUPS_CONFIG = [];
 
 // ─────────────────────────────────────────────────────────────
 // 1. User Profile Management (`users/{uid}`)
@@ -1587,15 +1526,23 @@ export async function loadMoreMessages(conversationId, oldestDoc, pageSize = 30)
  * Real-time listener for public community sports groups
  */
 export function subscribeToCommunityGroups(sportFilter = 'All', callback) {
-  // 1. Deliver local groups first
+  // 1. Deliver local groups first, stripping any default system groups
   try {
     const rawLocal = localStorage.getItem('turfington_community_groups');
     if (rawLocal) {
       const parsed = JSON.parse(rawLocal);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed.filter(g => 
+          !SYSTEM_DEFAULT_GROUP_IDS.has(g.groupId || g.id) &&
+          g.creatorUid !== 'turfington_official' &&
+          g.created_by !== 'turfington_official'
+        );
+        if (cleaned.length !== parsed.length) {
+          localStorage.setItem('turfington_community_groups', JSON.stringify(cleaned));
+        }
         const filteredLocal = (sportFilter && sportFilter !== 'All')
-          ? parsed.filter(g => g.sportCategory === sportFilter || g.sport === sportFilter)
-          : parsed;
+          ? cleaned.filter(g => g.sportCategory === sportFilter || g.sport === sportFilter)
+          : cleaned;
         callback(filteredLocal);
       }
     }
@@ -1610,55 +1557,57 @@ export function subscribeToCommunityGroups(sportFilter = 'All', callback) {
     }
 
     return onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        const groups = snapshot.docs.map(d => {
+      const groups = snapshot.docs
+        .map(d => {
           const data = d.data();
-          let img = data.imageUrl;
-          if (d.id === 'group_strike_bowling' || data.sportCategory === 'Bowling' || (data.name && data.name.toLowerCase().includes('bowling'))) {
-            img = '/bowling_group.jpg';
-          }
           return {
             groupId: d.id,
             id: d.id,
             ...data,
-            imageUrl: img || data.imageUrl
+            imageUrl: data.imageUrl || data.avatar
           };
-        });
-        try {
-          localStorage.setItem('turfington_community_groups', JSON.stringify(groups));
-        } catch {}
-        callback(groups);
-      } else {
-        // Fallback to configured default groups
-        const defaults = DEFAULT_COMMUNITY_GROUPS_CONFIG.map(g => ({
-          groupId: g.groupId,
-          id: g.groupId,
-          ...g
-        }));
-        const filtered = (sportFilter && sportFilter !== 'All')
-          ? defaults.filter(g => g.sportCategory === sportFilter)
-          : defaults;
-        callback(filtered);
-      }
+        })
+        .filter(g => 
+          !SYSTEM_DEFAULT_GROUP_IDS.has(g.groupId || g.id) &&
+          g.creatorUid !== 'turfington_official' &&
+          g.created_by !== 'turfington_official'
+        );
+
+      try {
+        localStorage.setItem('turfington_community_groups', JSON.stringify(groups));
+      } catch {}
+      callback(groups);
     }, (err) => {
       console.warn('subscribeToCommunityGroups notice (falling back to local):', err);
-      const defaults = DEFAULT_COMMUNITY_GROUPS_CONFIG.map(g => ({
-        groupId: g.groupId,
-        id: g.groupId,
-        ...g
-      }));
-      const filtered = (sportFilter && sportFilter !== 'All')
-        ? defaults.filter(g => g.sportCategory === sportFilter)
-        : defaults;
-      callback(filtered);
+      try {
+        const rawLocal = localStorage.getItem('turfington_community_groups');
+        const parsed = rawLocal ? JSON.parse(rawLocal) : [];
+        const cleaned = parsed.filter(g => 
+          !SYSTEM_DEFAULT_GROUP_IDS.has(g.groupId || g.id) &&
+          g.creatorUid !== 'turfington_official' &&
+          g.created_by !== 'turfington_official'
+        );
+        const filtered = (sportFilter && sportFilter !== 'All')
+          ? cleaned.filter(g => g.sportCategory === sportFilter || g.sport === sportFilter)
+          : cleaned;
+        callback(filtered);
+      } catch {
+        callback([]);
+      }
     });
   } catch (e) {
-    const defaults = DEFAULT_COMMUNITY_GROUPS_CONFIG.map(g => ({
-      groupId: g.groupId,
-      id: g.groupId,
-      ...g
-    }));
-    callback(defaults);
+    try {
+      const rawLocal = localStorage.getItem('turfington_community_groups');
+      const parsed = rawLocal ? JSON.parse(rawLocal) : [];
+      const cleaned = parsed.filter(g => 
+        !SYSTEM_DEFAULT_GROUP_IDS.has(g.groupId || g.id) &&
+        g.creatorUid !== 'turfington_official' &&
+        g.created_by !== 'turfington_official'
+      );
+      callback(cleaned);
+    } catch {
+      callback([]);
+    }
     return () => {};
   }
 }
@@ -1702,115 +1651,28 @@ export async function ensureDefaultCommunityData(currentUser) {
       await ensureUserProfile(currentUser);
     }
 
-    // Seed and synchronize local storage with default community groups
+    // Clean and purge any legacy default community groups from local storage
     try {
       const existingLocalGroups = JSON.parse(localStorage.getItem('turfington_community_groups') || '[]');
-      const seeded = DEFAULT_COMMUNITY_GROUPS_CONFIG.map(g => {
-        const found = existingLocalGroups.find(e => (e.groupId || e.id) === g.groupId);
-        return {
-          groupId: g.groupId,
-          id: g.groupId,
-          ...(found || {}),
-          ...g,
-          imageUrl: g.imageUrl,
-          avatar: g.imageUrl,
-          lastMessage: found?.lastMessage || {
-            text: g.initialMessage,
-            senderUid: 'turfington_official',
-            senderName: 'Turfington Community',
-            type: 'text',
-            timestamp: Date.now() - 1000 * 60 * 30
-          }
-        };
-      });
-      localStorage.setItem('turfington_community_groups', JSON.stringify(seeded));
+      const cleaned = existingLocalGroups.filter(g => 
+        !SYSTEM_DEFAULT_GROUP_IDS.has(g.groupId || g.id) &&
+        g.creatorUid !== 'turfington_official' &&
+        g.created_by !== 'turfington_official'
+      );
+      localStorage.setItem('turfington_community_groups', JSON.stringify(cleaned));
+
+      // Also clean default groups from current user inbox in local storage
+      const uid = currentUser?.uid || currentUser?.id || currentUser?.firebase_uid;
+      if (uid) {
+        const inboxKey = 	urfington_inbox_;
+        const existingInbox = JSON.parse(localStorage.getItem(inboxKey) || '[]');
+        const cleanedInbox = existingInbox.filter(item => 
+          !SYSTEM_DEFAULT_GROUP_IDS.has(item.conversationId || item.id || item.groupId) &&
+          item.creatorUid !== 'turfington_official'
+        );
+        localStorage.setItem(inboxKey, JSON.stringify(cleanedInbox));
+      }
     } catch {}
-
-    for (const group of DEFAULT_COMMUNITY_GROUPS_CONFIG) {
-      // Seed group initial message locally if empty
-      const existingMsgs = getLocalMessages(group.groupId);
-      if (existingMsgs.length === 0) {
-        saveLocalMessages(group.groupId, [{
-          id: `msg_init_${group.groupId}`,
-          idempotency_key: `msg_init_${group.groupId}`,
-          conversationId: group.groupId,
-          conversation_id: group.groupId,
-          senderUid: 'turfington_official',
-          sender_id: 'turfington_official',
-          senderName: 'Turfington Community',
-          user: 'Turfington Community',
-          senderAvatar: group.imageUrl,
-          avatar: group.imageUrl,
-          text: group.initialMessage,
-          content: group.initialMessage,
-          type: 'text',
-          reactions: {},
-          isDeleted: false,
-          createdAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-          status: 'sent'
-        }]);
-      }
-
-      const groupRef = doc(db, 'communityGroups', group.groupId);
-      const groupSnap = await getDoc(groupRef);
-
-      if (!groupSnap.exists()) {
-        const batch = writeBatch(db);
-
-        batch.set(groupRef, {
-          groupId: group.groupId,
-          name: group.name,
-          description: group.description,
-          sportCategory: group.sportCategory,
-          locationReference: group.locationReference,
-          imageUrl: group.imageUrl,
-          creatorUid: group.creatorUid,
-          visibility: group.visibility,
-          memberCount: group.memberCount,
-          conversationId: group.groupId,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-
-        const convRef = doc(db, 'conversations', group.groupId);
-        batch.set(convRef, {
-          id: group.groupId,
-          type: 'group',
-          groupId: group.groupId,
-          members: ['turfington_official'],
-          groupName: group.name,
-          groupImage: group.imageUrl,
-          creatorUid: group.creatorUid,
-          lastMessage: {
-            text: group.initialMessage,
-            senderUid: 'turfington_official',
-            senderName: 'Turfington Community',
-            type: 'text',
-            timestamp: Date.now() - 1000 * 60 * 30
-          },
-          lastMessageTimestamp: serverTimestamp(),
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-
-        // Seed initial message in Firestore
-        const initialMsgRef = doc(collection(db, 'conversations', group.groupId, 'messages'));
-        batch.set(initialMsgRef, {
-          id: initialMsgRef.id,
-          conversationId: group.groupId,
-          senderUid: 'turfington_official',
-          senderName: 'Turfington Community',
-          senderAvatar: group.imageUrl,
-          text: group.initialMessage,
-          type: 'text',
-          reactions: {},
-          isDeleted: false,
-          createdAt: serverTimestamp()
-        });
-
-        await batch.commit();
-      }
-    }
   } catch (err) {
     console.warn('ensureDefaultCommunityData notice:', err);
   }

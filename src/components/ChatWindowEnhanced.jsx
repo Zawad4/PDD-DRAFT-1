@@ -360,7 +360,7 @@ export default function ChatWindowEnhanced({
           <div className="relative flex-shrink-0">
             {isGroup ? (
               <img
-                src={chat.avatar || chat.avatar_url || chat.image_url || '/football_group.jpg'}
+                src={chat.imageUrl || chat.groupImage || chat.avatar || chat.avatar_url || chat.image_url || '/football_group.jpg'}
                 alt={chat.name || chat.user}
                 onError={(e) => {
                   e.currentTarget.onerror = null;

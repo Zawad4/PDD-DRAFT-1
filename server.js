@@ -124,9 +124,9 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(lat1 * (Math.PI / 180)) *
-      Math.cos(lat2 * (Math.PI / 180)) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
+    Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) *
+    Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const d = R * c;
   return parseFloat(d.toFixed(1));
@@ -661,8 +661,8 @@ app.post('/api/auth/send-otp', authRateLimiter, (req, res) => {
 
   res.json({
     success: true,
-    message: target.includes('@') 
-      ? `A 6-digit security code has been sent to your Email (${target}).` 
+    message: target.includes('@')
+      ? `A 6-digit security code has been sent to your Email (${target}).`
       : `A 6-digit security code has been sent via SMS to ${target}.`,
     expiresInSeconds: 300
   });
@@ -766,8 +766,8 @@ app.get('/api/venues', (req, res) => {
   }
 
   if (sport && sport !== 'All') {
-    venuesList = venuesList.filter(v => 
-      v.sport?.toLowerCase() === sport.toLowerCase() || 
+    venuesList = venuesList.filter(v =>
+      v.sport?.toLowerCase() === sport.toLowerCase() ||
       v.sports?.some(s => s.toLowerCase() === sport.toLowerCase())
     );
   }
@@ -978,7 +978,7 @@ app.get('/api/users', (req, res) => {
   if (query) {
     const q = query.toLowerCase().trim();
     const cleanQ = q.replace(/^@/, '');
-    users = users.filter(u => 
+    users = users.filter(u =>
       u.name?.toLowerCase().includes(cleanQ) ||
       u.full_name?.toLowerCase().includes(cleanQ) ||
       u.username?.toLowerCase().includes(cleanQ) ||
@@ -998,7 +998,7 @@ app.get('/api/users', (req, res) => {
 
     users = users.map(u => {
       if (u.id === currentUserId) return { ...u, friendStatus: 'self' };
-      const isFriend = friends.some(f => 
+      const isFriend = friends.some(f =>
         (f.user1 === currentUserId && f.user2 === u.id) ||
         (f.user2 === currentUserId && f.user1 === u.id)
       );
@@ -1060,7 +1060,7 @@ app.post('/api/friends/request', (req, res) => {
   db.friend_requests = db.friend_requests || [];
   db.friends = db.friends || [];
 
-  const alreadyFriend = db.friends.some(f => 
+  const alreadyFriend = db.friends.some(f =>
     (f.user1 === senderId && f.user2 === targetId) ||
     (f.user2 === senderId && f.user1 === targetId)
   );
@@ -1068,7 +1068,7 @@ app.post('/api/friends/request', (req, res) => {
     return res.json({ success: true, message: 'Already friends', friendStatus: 'friends' });
   }
 
-  let existing = db.friend_requests.find(r => 
+  let existing = db.friend_requests.find(r =>
     (r.senderId === senderId && r.targetId === targetId) ||
     (r.senderId === targetId && r.targetId === senderId)
   );
@@ -1114,7 +1114,7 @@ app.post('/api/friends/respond', (req, res) => {
   let directChatId = null;
 
   if (status === 'accepted') {
-    const exists = db.friends.some(f => 
+    const exists = db.friends.some(f =>
       (f.user1 === freq.senderId && f.user2 === freq.targetId) ||
       (f.user2 === freq.senderId && f.user1 === freq.targetId)
     );
@@ -1127,10 +1127,10 @@ app.post('/api/friends/respond', (req, res) => {
       });
     }
 
-    let chat = db.chats.find(c => 
-      c.type === 'direct' && 
-      c.participants && 
-      c.participants.includes(freq.senderId) && 
+    let chat = db.chats.find(c =>
+      c.type === 'direct' &&
+      c.participants &&
+      c.participants.includes(freq.senderId) &&
       c.participants.includes(freq.targetId)
     );
 
@@ -1162,9 +1162,9 @@ app.get('/api/chats', (req, res) => {
   const db = readDB();
   db.chats = db.chats || [];
 
-  let chats = db.chats.filter(c => 
-    c.type === 'group' || 
-    c.type === 'club' || 
+  let chats = db.chats.filter(c =>
+    c.type === 'group' ||
+    c.type === 'club' ||
     (c.participants && c.participants.includes(userId)) ||
     c.created_by === userId
   );
@@ -1765,7 +1765,7 @@ app.get('/api/payments/config', (req, res) => {
 app.post('/api/payments/create-order', async (req, res) => {
   try {
     const { amount, currency = 'INR', venue_id, user_id, title } = req.body;
-    
+
     const numAmount = typeof amount === 'number' ? amount : parseFloat(String(amount).replace(/[^\d.]/g, '')) || 1000;
     const amountInPaise = Math.round(numAmount * 100);
 
@@ -1809,7 +1809,7 @@ app.post('/api/payments/create-order', async (req, res) => {
     // Save order record to server database
     const db = readDB();
     if (!db.orders) db.orders = [];
-    
+
     db.orders.push({
       id: orderData.id,
       receipt: orderData.receipt,
@@ -1843,7 +1843,7 @@ app.post('/api/payments/create-order', async (req, res) => {
 // 13b. Verify Razorpay Payment Signature Endpoint
 app.post('/api/payments/verify', (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature, booking_info } = req.body;
-  
+
   if (!razorpay_payment_id) {
     return res.status(400).json({ success: false, error: 'Missing razorpay_payment_id' });
   }
@@ -1946,7 +1946,7 @@ app.post('/api/payments/webhook', (req, res) => {
       const db = readDB();
       if (!db.orders) db.orders = [];
       const order = db.orders.find(o => o.id === orderId);
-      
+
       // Idempotent state transition
       if (order && order.status !== 'CONFIRMED') {
         order.status = 'CONFIRMED';
@@ -2046,7 +2046,7 @@ app.get('/api/profiles/:idOrEmail', (req, res) => {
     const db = readDB();
     const target = decodeURIComponent(req.params.idOrEmail).toLowerCase();
     const list = [...(db.profiles || []), ...(db.users || [])];
-    const found = list.find(p => 
+    const found = list.find(p =>
       (p.id && String(p.id).toLowerCase() === target) ||
       (p.firebase_uid && String(p.firebase_uid).toLowerCase() === target) ||
       (p.email && String(p.email).toLowerCase() === target) ||
@@ -2074,7 +2074,7 @@ app.post('/api/profiles', (req, res) => {
     const targetId = incoming.id || incoming.firebase_uid || `usr_${Date.now()}`;
     const targetEmail = (incoming.email || '').toLowerCase();
 
-    const idx = db.profiles.findIndex(p => 
+    const idx = db.profiles.findIndex(p =>
       (p.id && String(p.id) === String(targetId)) ||
       (p.firebase_uid && String(p.firebase_uid) === String(incoming.firebase_uid)) ||
       (targetEmail && p.email && p.email.toLowerCase() === targetEmail)
@@ -2168,10 +2168,10 @@ function purgeAccountFromDatabase(db, rawTargets) {
   // 1. Profiles
   if (db.profiles) {
     const before = db.profiles.length;
-    db.profiles = db.profiles.filter(p => 
-      !matchesTarget(p.id) && 
-      !matchesTarget(p.firebase_uid) && 
-      !matchesTarget(p.email) && 
+    db.profiles = db.profiles.filter(p =>
+      !matchesTarget(p.id) &&
+      !matchesTarget(p.firebase_uid) &&
+      !matchesTarget(p.email) &&
       !matchesTarget(p.username)
     );
     totalPurged += (before - db.profiles.length);
@@ -2180,10 +2180,10 @@ function purgeAccountFromDatabase(db, rawTargets) {
   // 2. Users
   if (db.users) {
     const before = db.users.length;
-    db.users = db.users.filter(u => 
-      !matchesTarget(u.id) && 
-      !matchesTarget(u.firebase_uid) && 
-      !matchesTarget(u.email) && 
+    db.users = db.users.filter(u =>
+      !matchesTarget(u.id) &&
+      !matchesTarget(u.firebase_uid) &&
+      !matchesTarget(u.email) &&
       !matchesTarget(u.username)
     );
     totalPurged += (before - db.users.length);
@@ -2192,10 +2192,10 @@ function purgeAccountFromDatabase(db, rawTargets) {
   // 3. Bookings
   if (db.bookings) {
     const before = db.bookings.length;
-    db.bookings = db.bookings.filter(b => 
-      !matchesTarget(b.userId) && 
-      !matchesTarget(b.user_id) && 
-      !matchesTarget(b.email) && 
+    db.bookings = db.bookings.filter(b =>
+      !matchesTarget(b.userId) &&
+      !matchesTarget(b.user_id) &&
+      !matchesTarget(b.email) &&
       !matchesTarget(b.user_email)
     );
     totalPurged += (before - db.bookings.length);
@@ -2204,11 +2204,11 @@ function purgeAccountFromDatabase(db, rawTargets) {
   // 4. Player Reviews (both received and written)
   if (db.player_reviews) {
     const before = db.player_reviews.length;
-    db.player_reviews = db.player_reviews.filter(r => 
-      !matchesTarget(r.player_id) && 
-      !matchesTarget(r.player_email) && 
-      !matchesTarget(r.player_handle) && 
-      !matchesTarget(r.reviewer_id) && 
+    db.player_reviews = db.player_reviews.filter(r =>
+      !matchesTarget(r.player_id) &&
+      !matchesTarget(r.player_email) &&
+      !matchesTarget(r.player_handle) &&
+      !matchesTarget(r.reviewer_id) &&
       !matchesTarget(r.reviewer_email) &&
       !matchesTarget(r.reviewer_name)
     );
@@ -2218,9 +2218,9 @@ function purgeAccountFromDatabase(db, rawTargets) {
   // 5. Messages
   if (db.messages) {
     const before = db.messages.length;
-    db.messages = db.messages.filter(m => 
-      !matchesTarget(m.sender_id) && 
-      !matchesTarget(m.userId) && 
+    db.messages = db.messages.filter(m =>
+      !matchesTarget(m.sender_id) &&
+      !matchesTarget(m.userId) &&
       !matchesTarget(m.user)
     );
     totalPurged += (before - db.messages.length);
@@ -2239,10 +2239,10 @@ function purgeAccountFromDatabase(db, rawTargets) {
   // 7. Posts
   if (db.posts) {
     const before = db.posts.length;
-    db.posts = db.posts.filter(p => 
-      !matchesTarget(p.userId) && 
-      !matchesTarget(p.user_id) && 
-      !matchesTarget(p.created_by) && 
+    db.posts = db.posts.filter(p =>
+      !matchesTarget(p.userId) &&
+      !matchesTarget(p.user_id) &&
+      !matchesTarget(p.created_by) &&
       !matchesTarget(p.author_id)
     );
     totalPurged += (before - db.posts.length);
@@ -2355,13 +2355,13 @@ app.get('/api/players/:playerId/reviews', (req, res) => {
     const db = readDB();
     const { playerId } = req.params;
     const allReviews = db.player_reviews || [];
-    
+
     // Normalize target matching (by id, email, username or handle)
     const target = String(playerId).toLowerCase();
     let reviews = allReviews.filter(r => {
       return String(r.player_id).toLowerCase() === target ||
-             (r.player_handle && String(r.player_handle).toLowerCase() === target) ||
-             (r.player_email && String(r.player_email).toLowerCase() === target);
+        (r.player_handle && String(r.player_handle).toLowerCase() === target) ||
+        (r.player_email && String(r.player_email).toLowerCase() === target);
     });
 
     const total = reviews.length;

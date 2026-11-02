@@ -1103,178 +1103,25 @@ const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && impor
   ? import.meta.env.VITE_API_URL
   : (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.PROD ? '' : 'http://localhost:5000');
 
-export const DEFAULT_COMMUNITY_GROUPS = [
-  {
-    id: 'group_football_chennai',
-    name: '⚽ Chennai Football Turf Hub',
-    sport: 'Football',
-    type: 'group',
-    is_public: true,
-    avatar: '/football_group.jpg',
-    imageUrl: '/football_group.jpg',
-    description: 'Weekly 7v7 turf matches, tactical meetups, and friendly amateur leagues across Chennai.',
-    participants: ['turfington_official'],
-    members_count: 48,
-    created_by: 'turfington_official',
-    lastMessage: {
-      text: 'Welcome to Chennai Football Turf Hub! Share match plans, assemble squads, and book turfs.',
-      sender_id: 'turfington_official',
-      sender_name: 'Turfington Community',
-      timestamp: Date.now() - 1000 * 60 * 15
-    },
-    lastMessageText: 'Welcome to Chennai Football Turf Hub! Share match plans, assemble squads, and book turfs.',
-    lastMessageSender: 'Turfington Community',
-    lastMessageTime: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-    unreadCounts: {}
-  },
-  {
-    id: 'group_box_cricket',
-    name: '🏏 Box Cricket Warriors',
-    sport: 'Cricket',
-    type: 'group',
-    is_public: true,
-    avatar: '/cricket_group.jpg',
-    imageUrl: '/cricket_group.jpg',
-    description: 'Fast-paced box cricket tournaments, night matches, and weekend nets. Batsmen & bowlers welcome!',
-    participants: ['turfington_official'],
-    members_count: 62,
-    created_by: 'turfington_official',
-    lastMessage: {
-      text: 'Looking for box cricket players? Connect with teams and arrange weekend matches here!',
-      sender_id: 'turfington_official',
-      sender_name: 'Turfington Community',
-      timestamp: Date.now() - 1000 * 60 * 45
-    },
-    lastMessageText: 'Looking for box cricket players? Connect with teams and arrange weekend matches here!',
-    lastMessageSender: 'Turfington Community',
-    lastMessageTime: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-    unreadCounts: {}
-  },
-  {
-    id: 'group_badminton_smashers',
-    name: '🏸 Smashers Badminton Club',
-    sport: 'Badminton',
-    type: 'group',
-    is_public: true,
-    avatar: '/badminton_group.jpg',
-    imageUrl: '/badminton_group.jpg',
-    description: 'Wooden and synthetic court doubles, high-intensity rallies, and morning coaching sessions.',
-    participants: ['turfington_official'],
-    members_count: 35,
-    created_by: 'turfington_official',
-    lastMessage: {
-      text: 'Smashers Badminton Club: Find doubles partners and organize court sessions.',
-      sender_id: 'turfington_official',
-      sender_name: 'Turfington Community',
-      timestamp: Date.now() - 1000 * 60 * 120
-    },
-    lastMessageText: 'Smashers Badminton Club: Find doubles partners and organize court sessions.',
-    lastMessageSender: 'Turfington Community',
-    lastMessageTime: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-    unreadCounts: {}
-  },
-  {
-    id: 'group_pickleball_padel',
-    name: '🎾 Padel & Pickleball Aces',
-    sport: 'Pickleball',
-    type: 'group',
-    is_public: true,
-    avatar: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?q=80&w=600',
-    description: 'Chennai’s premier racket community. Discover paddle sports, casual doubles, and coaching drills.',
-    participants: ['turfington_official'],
-    members_count: 27,
-    created_by: 'turfington_official',
-    lastMessage: {
-      text: 'Welcome paddle & pickleball enthusiasts! Find partners and discuss the fastest growing sports.',
-      sender_id: 'turfington_official',
-      sender_name: 'Turfington Community',
-      timestamp: Date.now() - 1000 * 60 * 240
-    },
-    lastMessageText: 'Welcome paddle & pickleball enthusiasts! Find partners and discuss the fastest growing sports.',
-    lastMessageSender: 'Turfington Community',
-    lastMessageTime: new Date(Date.now() - 1000 * 60 * 240).toISOString(),
-    unreadCounts: {}
-  },
-  {
-    id: 'group_table_tennis',
-    name: '🏓 Table Tennis Spinners',
-    sport: 'Table Tennis',
-    type: 'group',
-    is_public: true,
-    avatar: 'https://images.unsplash.com/photo-1611251135345-18c56206b863?q=80&w=600',
-    description: 'Ping pong enthusiasts, spin-masters, and local tournament coordination.',
-    participants: ['turfington_official'],
-    members_count: 19,
-    created_by: 'turfington_official',
-    lastMessage: {
-      text: 'Practice loops, rallies, and weekly table tennis matchups across city centers.',
-      sender_id: 'turfington_official',
-      sender_name: 'Turfington Community',
-      timestamp: Date.now() - 1000 * 60 * 360
-    },
-    lastMessageText: 'Practice loops, rallies, and weekly table tennis matchups across city centers.',
-    lastMessageSender: 'Turfington Community',
-    lastMessageTime: new Date(Date.now() - 1000 * 60 * 360).toISOString(),
-    unreadCounts: {}
-  },
-  {
-    id: 'group_strike_bowling',
-    name: '🎳 Strike Bowling Squad',
-    sport: 'Bowling',
-    type: 'group',
-    is_public: true,
-    avatar: '/bowling_group.jpg',
-    imageUrl: '/bowling_group.jpg',
-    description: '10-pin bowling nights, high score leaderboards, and weekend squad socials.',
-    participants: ['turfington_official'],
-    members_count: 22,
-    created_by: 'turfington_official',
-    lastMessage: {
-      text: 'Strike Bowling Squad: Coordinate weekend 10-pin sessions and team tournaments!',
-      sender_id: 'turfington_official',
-      sender_name: 'Turfington Community',
-      timestamp: Date.now() - 1000 * 60 * 480
-    },
-    lastMessageText: 'Strike Bowling Squad: Coordinate weekend 10-pin sessions and team tournaments!',
-    lastMessageSender: 'Turfington Community',
-    lastMessageTime: new Date(Date.now() - 1000 * 60 * 480).toISOString(),
-    unreadCounts: {}
-  }
-];
+export const DEFAULT_SYSTEM_GROUP_IDS = new Set([
+  'group_football_chennai',
+  'group_box_cricket',
+  'group_badminton_smashers',
+  'group_pickleball_chennai',
+  'group_pickleball_padel',
+  'group_table_tennis',
+  'group_table_tennis_warriors',
+  'group_strike_bowling',
+  'group_bowling_strikes'
+]);
+
+export const DEFAULT_COMMUNITY_GROUPS = [];
 
 /**
  * Ensures default sports groups exist in Firestore permanently
  */
 export async function apiEnsureDefaultSportsGroups() {
-  try {
-    for (const group of DEFAULT_COMMUNITY_GROUPS) {
-      const convRef = doc(db, 'conversations', group.id);
-      const snap = await getDoc(convRef);
-      if (!snap.exists()) {
-        await setDoc(convRef, {
-          ...group,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-
-        // Seed initial message in group
-        const msgRef = doc(collection(db, 'conversations', group.id, 'messages'));
-        await setDoc(msgRef, {
-          conversation_id: group.id,
-          sender_id: group.lastMessage.sender_id,
-          user: group.lastMessage.sender_name,
-          avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${group.lastMessage.sender_id}`,
-          content: group.lastMessage.text,
-          text: group.lastMessage.text,
-          status: 'sent',
-          createdAt: serverTimestamp(),
-          created_at: group.lastMessageTime
-        });
-      }
-    }
-  } catch (e) {
-    console.warn("apiEnsureDefaultSportsGroups notice:", e);
-  }
+  return true;
 }
 
 /**
@@ -1323,7 +1170,14 @@ export function subscribeToUserConversations(userId, onUpdate) {
       where('type', '==', 'group')
     );
     const unsubGroup = onSnapshot(groupQuery, (snap) => {
-      groupChats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      groupChats = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(g => 
+          !DEFAULT_SYSTEM_GROUP_IDS.has(g.id) &&
+          !DEFAULT_SYSTEM_GROUP_IDS.has(g.groupId) &&
+          g.creatorUid !== 'turfington_official' &&
+          g.created_by !== 'turfington_official'
+        );
       notify();
     }, (err) => console.warn('group conversations sub notice:', err));
 

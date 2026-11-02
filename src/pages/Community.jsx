@@ -4,7 +4,8 @@ import {
   Users, MessageSquare, Plus, Search, Shield, Flame, Trophy,
   Zap, Star, Bell, BellRing, Check, CheckCheck, X, ChevronRight,
   Filter, Sparkles, Compass, MapPin, Activity, ArrowLeft,
-  UserPlus, UserCheck, Radio, Circle, Pin, VolumeX, Volume2, Lock, ShieldCheck
+  UserPlus, UserCheck, Radio, Circle, Pin, VolumeX, Volume2, Lock, ShieldCheck,
+  Camera, Upload, Image as ImageIcon
 } from 'lucide-react';
 import SportIcon from '../components/SportIcon';
 import ChatWindowEnhanced from '../components/ChatWindowEnhanced';
@@ -21,7 +22,8 @@ import {
   toggleMuteConversation,
   registerDeviceToken,
   ensureDefaultCommunityData,
-  markConversationAsRead
+  markConversationAsRead,
+  SYSTEM_DEFAULT_GROUP_IDS
 } from '../services/chatService';
 import { apiFetchAthletes, apiSearchUsers, apiFollowUser, NPC_TEST_USER_IDS } from '../services/db';
 import { auth, setupPushNotifications } from '../services/firebase';
@@ -35,6 +37,13 @@ const SPORT_CATEGORIES = ['All', 'Football', 'Cricket', 'Badminton', 'Pickleball
 
 export function getGroupImage(group) {
   if (!group) return '/bowling_group.jpg';
+  // Custom user-uploaded PFP or image always takes precedence
+  if (group.imageUrl && typeof group.imageUrl === 'string' && group.imageUrl.trim()) {
+    return group.imageUrl;
+  }
+  if (group.avatar && typeof group.avatar === 'string' && group.avatar.trim()) {
+    return group.avatar;
+  }
   const name = String(group.name || group.title || group.groupName || '').toLowerCase();
   const sport = String(group.sportCategory || group.sport || '').toLowerCase();
   const gid = String(group.groupId || group.id || '').toLowerCase();
@@ -42,10 +51,6 @@ export function getGroupImage(group) {
   // Bowling group photo uploaded by user: strictly use /bowling_group.jpg
   if (sport.includes('bowling') || gid.includes('bowling') || name.includes('bowling')) {
     return '/bowling_group.jpg';
-  }
-  if (group.imageUrl) {
-    if (group.imageUrl.includes('bowling')) return '/bowling_group.jpg';
-    return group.imageUrl;
   }
   if (sport.includes('badminton') || gid.includes('badminton') || name.includes('badminton') || name.includes('smasher')) {
     return 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?q=80&w=600';
@@ -69,6 +74,10 @@ export function GroupAvatar({ group, className = "w-14 h-14 rounded-2xl", showBa
   const [imgFailed, setImgFailed] = useState(false);
   const sport = group?.sportCategory || group?.sport || 'Football';
   const imgUrl = getGroupImage(group);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [imgUrl]);
 
   const getGradient = (sp) => {
     const s = String(sp).toLowerCase();
@@ -137,7 +146,44 @@ export default function Community({ user, setTab }) {
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupSport, setNewGroupSport] = useState('Football');
   const [newGroupDesc, setNewGroupDesc] = useState('');
+  const [newGroupPfp, setNewGroupPfp] = useState('');
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const pfpFileInputRef = useRef(null);
+
+  // Club PFP upload handler
+  const handlePfpFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (loadEvent) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 400;
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        setNewGroupPfp(dataUrl);
+      };
+      img.src = loadEvent.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Push notifications
   const [notificationEnabled, setNotificationEnabled] = useState(false);
@@ -203,14 +249,21 @@ export default function Community({ user, setTab }) {
     // 1. Subscribe to User's personalized Inbox (users/{uid}/inbox)
     const unsubInbox = subscribeToUserInbox(currentUserId, (items) => {
       if (!isMounted) return;
-      setInboxItems(items);
+      const validItems = (items || []).filter(i => 
+        !SYSTEM_DEFAULT_GROUP_IDS.has(i.conversationId || i.id || i.groupId) &&
+        i.creatorUid !== 'turfington_official'
+      );
+      setInboxItems(validItems);
       setLoading(false);
 
       // Keep active chat in sync with updated inbox item without changing id / remounting!
       setActiveChat(prev => {
         if (!prev) return null;
         const prevId = prev.id || prev.conversationId || prev.groupId;
-        const matching = items.find(i => (i.conversationId === prevId || i.id === prevId || i.groupId === prevId));
+        if (SYSTEM_DEFAULT_GROUP_IDS.has(prevId) || prev.creatorUid === 'turfington_official') {
+          return null;
+        }
+        const matching = validItems.find(i => (i.conversationId === prevId || i.id === prevId || i.groupId === prevId));
         if (!matching) return prev;
         return {
           ...prev,
@@ -224,7 +277,12 @@ export default function Community({ user, setTab }) {
     // 2. Subscribe to Community Groups (communityGroups/{groupId})
     const unsubGroups = subscribeToCommunityGroups(selectedSport, (groups) => {
       if (!isMounted) return;
-      setCommunityGroups(groups);
+      const validGroups = (groups || []).filter(g => 
+        !SYSTEM_DEFAULT_GROUP_IDS.has(g.groupId || g.id) &&
+        g.creatorUid !== 'turfington_official' &&
+        g.created_by !== 'turfington_official'
+      );
+      setCommunityGroups(validGroups);
     });
 
     // 3. Fetch athletes for direct messaging (strictly excluding venue owners)
@@ -437,13 +495,16 @@ export default function Community({ user, setTab }) {
     const created = await createCommunityGroup({
       name: newGroupName.trim(),
       sportCategory: newGroupSport,
-      description: newGroupDesc.trim()
+      description: newGroupDesc.trim(),
+      imageUrl: newGroupPfp || ''
     }, user);
     setCreatingGroup(false);
     if (created) {
       setShowCreateGroupModal(false);
       setNewGroupName('');
       setNewGroupDesc('');
+      setNewGroupPfp('');
+      if (pfpFileInputRef.current) pfpFileInputRef.current.value = '';
       handleSelectChat(created);
       setActiveTabMode('hubs');
     }
@@ -465,6 +526,10 @@ export default function Community({ user, setTab }) {
   // Filtered lists
   const filteredHubs = useMemo(() => {
     return communityGroups.filter(group => {
+      const gid = group.groupId || group.id;
+      if (SYSTEM_DEFAULT_GROUP_IDS.has(gid) || group.creatorUid === 'turfington_official' || group.created_by === 'turfington_official') {
+        return false;
+      }
       if (selectedSport !== 'All' && group.sportCategory !== selectedSport) {
         return false;
       }
@@ -822,9 +887,23 @@ export default function Community({ user, setTab }) {
                     🏆
                   </div>
                   <div>
-                    <p className="text-xs font-bold text-neutral-300">No sports clubs found</p>
-                    <p className="text-[11px] text-neutral-500 mt-1">Try another sport filter or create a new sports club.</p>
+                    <p className="text-xs font-bold text-neutral-300">
+                      {selectedSport !== 'All' ? `No ${selectedSport} clubs yet` : 'No sports clubs yet'}
+                    </p>
+                    <p className="text-[11px] text-neutral-500 mt-1">
+                      Be the first athlete to create an athlete hub!
+                    </p>
                   </div>
+                  <button
+                    onClick={() => {
+                      if (selectedSport !== 'All') setNewGroupSport(selectedSport);
+                      setShowCreateGroupModal(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-xs font-bold text-indigo-200 hover:text-white transition-all cursor-pointer"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Create Club</span>
+                  </button>
                 </div>
               ) : (
                 filteredHubs.map(group => {
@@ -1413,7 +1492,11 @@ export default function Community({ user, setTab }) {
                   <p className="text-[11px] text-neutral-400">Start an open group for match coordination</p>
                 </div>
                 <button
-                  onClick={() => setShowCreateGroupModal(false)}
+                  onClick={() => {
+                    setShowCreateGroupModal(false);
+                    setNewGroupPfp('');
+                    if (pfpFileInputRef.current) pfpFileInputRef.current.value = '';
+                  }}
                   className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white"
                 >
                   <X className="w-4 h-4" />
@@ -1421,6 +1504,72 @@ export default function Community({ user, setTab }) {
               </div>
 
               <form onSubmit={handleCreateGroup} className="p-5 space-y-4">
+                {/* Club Profile Picture (PFP) Upload */}
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider block mb-2">
+                    Club Profile Picture (PFP)
+                  </label>
+                  <input
+                    type="file"
+                    ref={pfpFileInputRef}
+                    accept="image/*"
+                    onChange={handlePfpFileChange}
+                    className="hidden"
+                  />
+                  <div className="flex items-center gap-4">
+                    <div
+                      onClick={() => pfpFileInputRef.current?.click()}
+                      className="relative w-20 h-20 rounded-2xl bg-black/40 border-2 border-dashed border-indigo-500/40 hover:border-indigo-400 transition-colors flex flex-col items-center justify-center cursor-pointer overflow-hidden group shrink-0"
+                    >
+                      {newGroupPfp ? (
+                        <>
+                          <img
+                            src={newGroupPfp}
+                            alt="Club PFP Preview"
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <Camera className="w-5 h-5 text-white" />
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-center p-1">
+                          <Camera className="w-5 h-5 text-indigo-400 group-hover:scale-110 transition-transform mb-1" />
+                          <span className="text-[9px] font-bold text-neutral-400 uppercase">Upload</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => pfpFileInputRef.current?.click()}
+                          className="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-[11px] font-bold text-indigo-300 hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{newGroupPfp ? 'Change Photo' : 'Upload Club PFP'}</span>
+                        </button>
+                        {newGroupPfp && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewGroupPfp('');
+                              if (pfpFileInputRef.current) pfpFileInputRef.current.value = '';
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 border border-white/10 text-[11px] font-bold text-neutral-400 transition-colors cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-neutral-500 leading-relaxed">
+                        Add a custom logo or emblem for this sports club. Visible across all club matches & chats.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <label className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider block mb-1.5">
                     Club / Group Name
@@ -1466,7 +1615,11 @@ export default function Community({ user, setTab }) {
                 <div className="pt-2 flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowCreateGroupModal(false)}
+                    onClick={() => {
+                      setShowCreateGroupModal(false);
+                      setNewGroupPfp('');
+                      if (pfpFileInputRef.current) pfpFileInputRef.current.value = '';
+                    }}
                     className="px-4 py-2.5 rounded-xl text-xs font-bold text-neutral-400 hover:text-white"
                   >
                     Cancel
